@@ -69,8 +69,14 @@ MODE INSTRUCTIONS:
 - GENERAL: Respond as the AI STRATEGIST with the most appropriate analysis.
 
 Maintain military brevity. Use authoritative, technical language. Never break character.
-Respond in the following JSON format:
-{{jsonSchema output.schema}}`,
+Return a single valid JSON object with exactly these fields:
+- source: one of "AI_STRATEGIST" | "SIMULATION_ENGINE" | "INTEL_DIVISION" | "FOG_OF_WAR_MODULE"
+- headline: string (max 12 words)
+- body: string (2-5 sentences, military tone)
+- classification: one of "TOP_SECRET" | "SECRET" | "CONFIDENTIAL" | "UNCLASSIFIED"
+- metrics: array of { label: string, value: string } (optional, omit if not applicable)
+
+Respond only with the JSON object. No markdown fences, no commentary.`,
 });
 
 // ─── Flow ─────────────────────────────────────────────────────────────────────

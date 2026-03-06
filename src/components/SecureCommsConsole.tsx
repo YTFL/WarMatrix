@@ -20,7 +20,7 @@ import { strategicCommandChat, StrategicChatOutput } from '@/ai/flows/strategic-
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type MessageSource =
+export type MessageSource =
     | 'COMMAND_INPUT'
     | 'AI_STRATEGIST'
     | 'SIMULATION_ENGINE'
@@ -28,7 +28,7 @@ type MessageSource =
     | 'FOG_OF_WAR_MODULE'
     | 'SYSTEM';
 
-interface ChatMessage {
+export interface ChatMessage {
     id: string;
     source: MessageSource;
     headline?: string;
@@ -44,11 +44,13 @@ interface Props {
     isOpen: boolean;
     onClose: () => void;
     battlefieldContext?: string;
+    messages: ChatMessage[];
+    onMessagesChange: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function nowTs() {
+export function nowTs() {
     return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
@@ -68,7 +70,7 @@ const classificationColor: Record<string, string> = {
     UNCLASSIFIED: '#4B5563',
 };
 
-const INITIAL_LOG: ChatMessage[] = [
+export const INITIAL_LOG: ChatMessage[] = [
     {
         id: 'sys-1',
         source: 'SYSTEM',
@@ -134,11 +136,10 @@ const ACTIONS: ActionDef[] = [
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sector Alpha-9, Highland terrain. Friendly forces at grid B3 and E5. Enemy forces detected at grid D7 and F2.' }: Props) {
-    const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_LOG);
-    const [historyLog, setHistoryLog] = useState<ChatMessage[]>(INITIAL_LOG);
+export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sector Alpha-9, Highland terrain. Friendly forces at grid B3 and E5. Enemy forces detected at grid D7 and F2.', messages, onMessagesChange }: Props) {
     const [inputValue, setInputValue] = useState('');
     const [loading, setLoading] = useState(false);
+    const [aiServerOnline, setAiServerOnline] = useState<boolean | null>(null); // null = checking
     const chatEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -149,6 +150,10 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
     useEffect(() => {
         if (isOpen) {
             setTimeout(() => inputRef.current?.focus(), 300);
+            // Ping the health proxy to show real AI server status
+            fetch('/api/sitrep')
+                .then((r) => setAiServerOnline(r.ok))
+                .catch(() => setAiServerOnline(false));
         }
     }, [isOpen]);
 
@@ -162,14 +167,14 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
             timestamp: nowTs(),
         };
 
-        setMessages((prev) => [...prev, userMsg]);
-        setHistoryLog((prev) => [...prev, userMsg]);
+        onMessagesChange((prev) => [...prev, userMsg]);
         setInputValue('');
         setLoading(true);
 
         try {
             // ── PRIMARY: Python fine-tuned AI server ──────────────────────────
             let usedFallback = false;
+            let serverErrorMsg: string | null = null;
             let aiMsg: ChatMessage | null = null;
 
             try {
@@ -177,50 +182,82 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        instruction: directive.trim(),
+                        directive: directive.trim(),
+                        mode,
                         battlefield_data: battlefieldContext,
                     }),
                 });
 
+                const data = await res.json();
+
                 if (res.ok) {
-                    const data = await res.json();
+                    // ✅ Success — model responded
+                    setAiServerOnline(true);
                     aiMsg = {
                         id: `ai-${Date.now()}`,
                         source: 'AI_STRATEGIST',
                         headline: 'TACTICAL AI RESPONSE',
-                        body: data.response ?? '(No response from AI server)',
+                        body: data.response ?? '(Empty response from AI server)',
                         timestamp: nowTs(),
                         classification: 'CONFIDENTIAL',
                     };
+                } else if (data?.error === 'ai_server_offline') {
+                    // ❌ Server genuinely not reachable
+                    setAiServerOnline(false);
+                    serverErrorMsg = 'AI SERVER OFFLINE — Local model server is not reachable. Start backend_server.py to restore the uplink.';
+                    usedFallback = true;
+                } else if (data?.error === 'ai_inference_timeout') {
+                    // ⏳ Server is alive but took too long (CPU inference is slow)
+                    setAiServerOnline(true);
+                    serverErrorMsg = 'INFERENCE TIMEOUT — The model is still processing. Wait a moment and try again, or reduce the length of your directive.';
+                    usedFallback = true;
                 } else {
-                    // Server returned an error (e.g. 503 = offline) → fall through
+                    // ⚠️ Server is up but inference failed (bad flags, OOM, etc.)
+                    setAiServerOnline(true);
+                    serverErrorMsg = `INFERENCE ERROR — ${data?.details ?? 'The model returned an error. Check backend_server.py logs.'}`;
                     usedFallback = true;
                 }
             } catch {
-                // Network-level failure → fall through to Genkit
+                // Network-level failure (fetch threw) → treat as offline
+                setAiServerOnline(false);
+                serverErrorMsg = 'AI SERVER OFFLINE — Could not reach backend_server.py.';
                 usedFallback = true;
             }
 
             // ── FALLBACK: Genkit / Gemini ─────────────────────────────────────
+            // Controlled by NEXT_PUBLIC_GEMINI_FALLBACK_ENABLED in .env.local.
+            // Set to "true" to re-enable. API key: GOOGLE_GENAI_API_KEY in .env.local.
+            const geminiFallbackEnabled =
+                process.env.NEXT_PUBLIC_GEMINI_FALLBACK_ENABLED === 'true';
+
             if (usedFallback || aiMsg === null) {
-                const result: StrategicChatOutput = await strategicCommandChat({
-                    directive: directive.trim(),
-                    mode,
-                    context: battlefieldContext,
-                });
-                aiMsg = {
-                    id: `ai-${Date.now()}`,
-                    source: result.source as MessageSource,
-                    headline: result.headline,
-                    body: result.body,
-                    timestamp: nowTs(),
-                    classification: result.classification,
-                    metrics: result.metrics,
-                };
+                if (geminiFallbackEnabled) {
+                    const result: StrategicChatOutput = await strategicCommandChat({
+                        directive: directive.trim(),
+                        mode,
+                        context: battlefieldContext,
+                    });
+                    aiMsg = {
+                        id: `ai-${Date.now()}`,
+                        source: result.source as MessageSource,
+                        headline: result.headline,
+                        body: result.body,
+                        timestamp: nowTs(),
+                        classification: result.classification,
+                        metrics: result.metrics,
+                    };
+                } else {
+                    // Fallback disabled — surface the specific error from the server
+                    aiMsg = {
+                        id: `sys-${Date.now()}`,
+                        source: 'SYSTEM',
+                        body: serverErrorMsg ?? 'AI server did not respond. Check that backend_server.py is running.',
+                        timestamp: nowTs(),
+                    };
+                }
             }
 
-            setMessages((prev) => [...prev, aiMsg!]);
-            setHistoryLog((prev) => [...prev, aiMsg!]);
+            onMessagesChange((prev) => [...prev, aiMsg!]);
         } catch (err) {
             const errMsg: ChatMessage = {
                 id: `err-${Date.now()}`,
@@ -228,11 +265,11 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                 body: 'UPLINK FAILURE — All AI channels timed out. Check server status.',
                 timestamp: nowTs(),
             };
-            setMessages((prev) => [...prev, errMsg]);
-            setHistoryLog((prev) => [...prev, errMsg]);
+            onMessagesChange((prev) => [...prev, errMsg]);
         } finally {
             setLoading(false);
         }
+
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -300,7 +337,7 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                             <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#1F6FEB]/70">Conversation Log</span>
                         </div>
                         <div className="flex-1 overflow-y-auto scrollbar-hide p-2 flex flex-col gap-1">
-                            {historyLog.map((msg) => {
+                            {messages.map((msg) => {
                                 const style = sourceStyle[msg.source];
                                 return (
                                     <div
@@ -481,14 +518,20 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                                     </div>
                                     <div className="flex flex-col gap-1.5">
                                         {[
-                                            { label: 'AI Core', value: 'ONLINE', ok: true },
-                                            { label: 'Sim Engine', value: 'READY', ok: true },
-                                            { label: 'Intel Feed', value: 'ACTIVE', ok: true },
-                                            { label: 'Link Integrity', value: '99.8%', ok: true },
+                                            {
+                                                label: 'AI Core',
+                                                value: aiServerOnline === null ? 'CHECKING' : aiServerOnline ? 'ONLINE' : 'OFFLINE',
+                                                ok: aiServerOnline === true,
+                                                warn: aiServerOnline === null,
+                                            },
+                                            { label: 'Sim Engine', value: 'READY', ok: true, warn: false },
+                                            { label: 'Intel Feed', value: 'ACTIVE', ok: true, warn: false },
+                                            { label: 'Link Integrity', value: '99.8%', ok: true, warn: false },
                                         ].map((s) => (
                                             <div key={s.label} className="flex justify-between items-center">
                                                 <span className="text-[7px] font-mono text-[#4B5563]">{s.label}</span>
-                                                <span className={`text-[7px] font-bold font-mono ${s.ok ? 'text-[#22C55E]' : 'text-[#EF4444]'}`}>
+                                                <span className={`text-[7px] font-bold font-mono ${s.warn ? 'text-[#F59E0B]' : s.ok ? 'text-[#22C55E]' : 'text-[#EF4444]'
+                                                    }`}>
                                                     {s.value}
                                                 </span>
                                             </div>

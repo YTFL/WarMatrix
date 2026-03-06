@@ -1,34 +1,146 @@
 import { NextResponse } from 'next/server';
 
-const AI_SERVER_URL = 'http://127.0.0.1:8000/api/sitrep';
+const AI_SERVER_BASE = 'http://127.0.0.1:8000';
+const INFERENCE_TIMEOUT_MS = 300_000; // 5 min — CPU inference can be slow
+const HEALTH_TIMEOUT_MS = 5_000;     // 5 s  — quick ping only
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface SitrepRequestBody {
+    /** The operator's raw tactical directive / question */
+    directive?: string;
+    /** Current battlefield state (units, grid positions, weather, etc.) */
+    battlefield_data?: string;
+    /**
+     * Optional operational mode — used to enrich the instruction sent to the
+     * model so it frames its response correctly.
+     */
+    mode?: 'SCENARIO_SEED' | 'INTEL_UPDATE' | 'FOG_OF_WAR' | 'EXPLAIN_DECISION' | 'GENERAL';
+    /** Max tokens for the model to emit (clamped to 64-1024). */
+    max_new_tokens?: number;
+    /** Sampling temperature (clamped to 0.0-2.0). */
+    temperature?: number;
+    /** Nucleus sampling top-p (clamped to 0.1-1.0). */
+    top_p?: number;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Maps the UI mode into a concrete instruction passed to the wargaming model. */
+function buildInstruction(directive: string, mode: SitrepRequestBody['mode']): string {
+    const prefixes: Record<NonNullable<SitrepRequestBody['mode']>, string> = {
+        SCENARIO_SEED:
+            'Generate a full operational scenario briefing including strategic context, battlefield situation, and initial intelligence based on the following:',
+        INTEL_UPDATE:
+            'Provide a detailed intelligence update including enemy movements, signal intercepts, and threat assessments based on the following:',
+        FOG_OF_WAR:
+            'Inject a realistic fog-of-war uncertainty event (lost comms, unidentified units, weather disruption) into the following scenario:',
+        EXPLAIN_DECISION:
+            'Provide structured explainable reasoning for the simulation results, predicted outcomes, and risk signals based on the following:',
+        GENERAL: 'Generate a tactical SITREP in response to the following commander directive:',
+    };
+
+    const prefix = prefixes[mode ?? 'GENERAL'];
+    return `${prefix}\n\n${directive}`;
+}
+
+/** Safely clamps a number within a min/max range. */
+function clamp(val: number | undefined, min: number, max: number, def: number): number {
+    if (val === undefined || isNaN(Number(val))) return def;
+    return Math.max(min, Math.min(max, Number(val)));
+}
+
+// ─── GET  /api/sitrep  (health check proxy) ───────────────────────────────────
+
+export async function GET() {
+    try {
+        const res = await fetch(`${AI_SERVER_BASE}/health`, {
+            signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+        });
+        const data = await res.json();
+        return NextResponse.json(data, { status: res.status });
+    } catch {
+        return NextResponse.json(
+            { ok: false, error: 'ai_server_offline', model_loaded: false },
+            { status: 503 }
+        );
+    }
+}
+
+// ─── POST /api/sitrep ─────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-    let body: unknown;
+    // 1. Parse incoming body
+    let raw: SitrepRequestBody;
     try {
-        body = await req.json();
+        raw = (await req.json()) as SitrepRequestBody;
     } catch {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
+    // 2. Validate required fields
+    const directive = (raw.directive ?? '').trim();
+    const battlefield_data = (raw.battlefield_data ?? '').trim();
+
+    if (!directive && !battlefield_data) {
+        return NextResponse.json(
+            { error: 'At least one of directive or battlefield_data is required.' },
+            { status: 400 }
+        );
+    }
+
+    // 3. Structure / enrich the payload before forwarding
+    const payload = {
+        instruction: buildInstruction(directive || 'Generate a tactical SITREP.', raw.mode),
+        battlefield_data: battlefield_data || directive,
+        max_new_tokens: clamp(raw.max_new_tokens, 32, 512, 150),
+        temperature: clamp(raw.temperature, 0.0, 2.0, 0.45),
+        top_p: clamp(raw.top_p, 0.1, 1.0, 0.9),
+    };
+
+    // 4. Forward to the Python AI server
     try {
-        const res = await fetch(AI_SERVER_URL, {
+        const res = await fetch(`${AI_SERVER_BASE}/api/sitrep`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            // Short timeout so the fallback triggers quickly when server is offline
-            signal: AbortSignal.timeout(15_000),
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(INFERENCE_TIMEOUT_MS),
         });
 
         const data = await res.json();
+
+        if (!res.ok) {
+            // Python server is reachable but returned an error (e.g. inference failed)
+            return NextResponse.json(
+                {
+                    error: 'ai_inference_error',
+                    details: data?.details ?? data?.error ?? 'Inference failed on the AI server.',
+                },
+                { status: res.status }
+            );
+        }
+
         return NextResponse.json(data, { status: res.status });
     } catch (err: unknown) {
-        const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+        const isTimeout =
+            (err instanceof DOMException && err.name === 'TimeoutError') ||
+            (err instanceof Error && err.name === 'TimeoutError');
+
+        if (isTimeout) {
+            // Server is alive but inference took too long — NOT the same as offline
+            return NextResponse.json(
+                {
+                    error: 'ai_inference_timeout',
+                    details: `AI server did not respond within ${INFERENCE_TIMEOUT_MS / 1000}s. The model may still be running.`,
+                },
+                { status: 504 }
+            );
+        }
+
         return NextResponse.json(
             {
                 error: 'ai_server_offline',
-                details: isTimeout
-                    ? 'Request to AI server timed out.'
-                    : 'Could not reach the local AI server. Is backend_server.py running?',
+                details: 'Could not reach the local AI server. Is backend_server.py running?',
             },
             { status: 503 }
         );

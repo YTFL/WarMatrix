@@ -1,0 +1,657 @@
+'use client';
+
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ScenarioUnit {
+    id: string;
+    type: 'FRIENDLY' | 'ENEMY' | 'OBJECTIVE';
+    x: number; // 1-11
+    y: number; // 1-7
+    label: string;
+    assetClass?: string;
+    allianceRole?: string;
+}
+
+interface TacticalMapDisplayProps {
+    units: ScenarioUnit[];
+    terrainType?: 'Highland' | 'Forest' | 'Urban' | 'Plains' | 'Desert';
+    scenarioTitle?: string;
+    mapPeaks?: { cx: number; cy: number; h: number; r2: number }[];
+}
+
+// ─── Terrain palettes ─────────────────────────────────────────────────────────
+
+const neonBlueStyle = {
+    bg: '#02060E',
+    tint0: 'rgba(2, 6, 15, 1)',
+    tint1: 'rgba(2, 8, 22, 1)',
+    tint2: 'rgba(2, 12, 34, 1)',
+    tint3: 'rgba(2, 18, 50, 1)',
+    tint4: 'rgba(2, 28, 70, 1)',
+    contour0: 'rgba(10, 45, 140, 0.45)',
+    contour1: 'rgba(15, 75, 200, 0.65)',
+    contour2: 'rgba(25, 120, 255, 0.85)',
+    contourPeak: 'rgba(80, 200, 255, 0.98)',
+    gridLine: 'rgba(31, 111, 235, 0.16)',
+    axisText: 'rgba(31, 111, 235, 0.45)',
+    infoColor: '#00C8FF',
+};
+
+const TERRAIN_CONFIG = {
+    Highland: { ...neonBlueStyle, label: 'Highland / Rugged', elevTag: 'HIGH ALT' },
+    Forest: { ...neonBlueStyle, label: 'Dense Forest', elevTag: 'CANOPY' },
+    Urban: { ...neonBlueStyle, label: 'Urban Combat Zone', elevTag: 'STRUCTURE' },
+    Plains: { ...neonBlueStyle, label: 'Open Plains', elevTag: 'LOW ALT' },
+    Desert: { ...neonBlueStyle, label: 'Desert / Arid', elevTag: 'DUNE FIELD' },
+} as const;
+
+type TerrainKey = keyof typeof TERRAIN_CONFIG;
+type TC = typeof TERRAIN_CONFIG[TerrainKey];
+
+// ─── Deterministic PRNG ────────────────────────────────────────────────────────
+
+function seededRng(seed: number) {
+    let s = Math.abs(seed) | 0;
+    return () => {
+        s = (Math.imul(1664525, s) + 1013904223) | 0;
+        return (s >>> 0) / 0x100000000;
+    };
+}
+
+// ─── Heightmap — Gaussian sum-of-peaks ────────────────────────────────────────
+
+function buildHeightmap(
+    terrain: string,
+    cols: number,
+    rows: number,
+    seedString: string,
+    mapPeaks?: { cx: number; cy: number; h: number; r2: number }[]
+): Float32Array {
+    const N = (cols + 1) * (rows + 1);
+    const map = new Float32Array(N);
+    const idx = (r: number, c: number) => r * (cols + 1) + c;
+    const combinedSeed = terrain + seedString;
+    const rng = seededRng(
+        combinedSeed.split('').reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 17)
+    );
+
+    const peaks: { cx: number; cy: number; h: number; r2: number }[] = [];
+
+    if (mapPeaks && mapPeaks.length > 0) {
+        // Use AI dictated peaks, but boost their radius and height for structural impact
+        mapPeaks.forEach(p => {
+            peaks.push({ ...p, h: p.h * 1.5, r2: p.r2 * 1.5 });
+        });
+        // Add a few procedural background hills for texture
+        for (let i = 0; i < 12; i++) {
+            peaks.push({
+                cx: rng() * cols, cy: rng() * rows,
+                h: rng() * 0.35 + 0.1, r2: (rng() * cols * 0.15 + cols * 0.05) ** 2,
+            });
+        }
+    } else {
+        // Procedural map generation
+        const numPeaks = terrain === 'Plains' ? 12 : terrain === 'Urban' ? 32 : 24;
+        for (let i = 0; i < numPeaks; i++) {
+            peaks.push({
+                cx: rng() * cols, cy: rng() * rows,
+                h: rng() * 0.45 + 0.25, r2: (rng() * cols * 0.25 + cols * 0.05) ** 2,
+            });
+        }
+    }
+
+    let maxH = 0;
+    for (let r = 0; r <= rows; r++) {
+        for (let c = 0; c <= cols; c++) {
+            let h = 0;
+            for (const p of peaks) {
+                const dx = c - p.cx;
+                const dy = r - p.cy;
+                h += p.h * Math.exp(-(dx * dx + dy * dy) / p.r2);
+            }
+            map[idx(r, c)] = h;
+            if (h > maxH) maxH = h;
+        }
+    }
+
+    const scale = maxH > 0 ? 1 / maxH : 1;
+    for (let i = 0; i < N; i++) {
+        let h = map[i] * scale;
+        h += (rng() - 0.5) * 0.06; // micro noise
+        map[i] = Math.max(0, Math.min(1, h));
+    }
+
+    return map;
+
+    // expose the idx helper via closure isn't needed externally — it's inlined
+}
+
+// ─── Marching-squares contour segments ────────────────────────────────────────
+
+function buildContourPaths(
+    map: Float32Array,
+    cols: number,
+    rows: number,
+    levels: number[],
+    cellW: number,
+    cellH: number,
+    padL: number,
+    padT: number,
+): string[] {
+    const idx = (r: number, c: number) => r * (cols + 1) + c;
+
+    return levels.map(level => {
+        const segs: string[] = [];
+
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const tl = map[idx(r, c)];
+                const tr = map[idx(r, c + 1)];
+                const bl = map[idx(r + 1, c)];
+                const br = map[idx(r + 1, c + 1)];
+
+                // SVG pixel positions of the four corners
+                const x0 = padL + c * cellW;
+                const y0 = padT + r * cellH;
+                const x1 = x0 + cellW;
+                const y1 = y0 + cellH;
+
+                // Edge crossing points (linear interpolation)
+                const lerp = (a: number, b: number, t: number) => a + t * (b - a);
+                const top = (tl < level) !== (tr < level) ? { x: lerp(x0, x1, (level - tl) / (tr - tl)), y: y0 } : null;
+                const bot = (bl < level) !== (br < level) ? { x: lerp(x0, x1, (level - bl) / (br - bl)), y: y1 } : null;
+                const lft = (tl < level) !== (bl < level) ? { x: x0, y: lerp(y0, y1, (level - tl) / (bl - tl)) } : null;
+                const rgt = (tr < level) !== (br < level) ? { x: x1, y: lerp(y0, y1, (level - tr) / (br - tr)) } : null;
+
+                const pts = [top, bot, lft, rgt].filter(Boolean) as { x: number; y: number }[];
+                if (pts.length === 2) {
+                    segs.push(
+                        `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}L${pts[1].x.toFixed(1)},${pts[1].y.toFixed(1)}`
+                    );
+                }
+            }
+        }
+        return segs.join(' ');
+    });
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function TacticalMapDisplay({
+    units,
+    terrainType = 'Highland',
+    scenarioTitle,
+    mapPeaks,
+}: TacticalMapDisplayProps) {
+    const tc: TC = TERRAIN_CONFIG[terrainType as TerrainKey] ?? TERRAIN_CONFIG.Highland;
+
+    // Pan & Zoom State
+    const [zoom, setZoom] = useState(1);
+    const [panX, setPanX] = useState(0);
+    const [panY, setPanY] = useState(0);
+    const [isDragging, setIsDragging] = useState(false);
+    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
+    // Hover & Tooltip State
+    const [hoveredUnit, setHoveredUnit] = useState<ScenarioUnit | null>(null);
+    const [mouseClient, setMouseClient] = useState({ x: 0, y: 0 });
+
+    const svgRef = useRef<SVGSVGElement>(null);
+
+    useEffect(() => {
+        const svg = svgRef.current;
+        if (!svg) return;
+
+        const handleNativeWheel = (e: WheelEvent) => {
+            e.preventDefault(); // Prevent browser from scrolling/zooming the whole page
+            const scaleBy = 1.08;
+            setZoom(prev => {
+                return e.deltaY < 0 ? Math.min(prev * scaleBy, 8) : Math.max(prev / scaleBy, 0.4);
+            });
+        };
+
+        svg.addEventListener('wheel', handleNativeWheel, { passive: false });
+
+        return () => svg.removeEventListener('wheel', handleNativeWheel);
+    }, []);
+
+    const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+        setIsDragging(true);
+        setDragStart({ x: e.clientX, y: e.clientY });
+        (e.target as Element).setPointerCapture(e.pointerId);
+    };
+
+    const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+        setMouseClient({ x: e.clientX, y: e.clientY });
+        if (isDragging) {
+            setPanX(prev => prev + (e.clientX - dragStart.x));
+            setPanY(prev => prev + (e.clientY - dragStart.y));
+            setDragStart({ x: e.clientX, y: e.clientY });
+        }
+    };
+
+    const handlePointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+        setIsDragging(false);
+        (e.target as Element).releasePointerCapture(e.pointerId);
+    };
+
+    // SVG canvas
+    const VW = 920;
+    const VH = 530;
+    const PL = 38, PT = 28, PR = 18, PB = 28;
+    const mapW = VW - PL - PR;
+    const mapH = VH - PT - PB;
+    const COLS = 44;
+    const ROWS = 28;
+    const cW = mapW / COLS;
+    const cH = mapH / ROWS;
+
+    // Heightmap — recalculate only when terrain or scenario title changes
+    const heightmap = useMemo(
+        () => buildHeightmap(terrainType, COLS, ROWS, scenarioTitle ?? 'default_seed', mapPeaks),
+        [terrainType, scenarioTitle, mapPeaks]
+    );
+
+    // Colour each cell by elevation band
+    const cellFills = useMemo(() => {
+        const fills: { x: number; y: number; fill: string }[] = [];
+        const idx = (r: number, c: number) => r * (COLS + 1) + c;
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const h = heightmap[idx(r, c)];
+                let fill: string;
+                if (h < 0.18) fill = tc.tint0;
+                else if (h < 0.35) fill = tc.tint1;
+                else if (h < 0.52) fill = tc.tint2;
+                else if (h < 0.70) fill = tc.tint3;
+                else fill = tc.tint4;
+
+                fills.push({ x: PL + c * cW, y: PT + r * cH, fill });
+            }
+        }
+        return fills;
+    }, [heightmap, tc, cW, cH]);
+
+    // Contour lines at 6 levels
+    const contourLevels = [0.20, 0.35, 0.52, 0.68, 0.82, 0.92];
+    const contourColors = [tc.contour0, tc.contour0, tc.contour1, tc.contour1, tc.contour2, tc.contourPeak];
+    const contourWidths = [0.7, 0.9, 1.1, 1.3, 1.8, 2.4];
+    const contourGlow = [false, false, false, true, true, true];
+
+    const contourPaths = useMemo(
+        () => buildContourPaths(heightmap, COLS, ROWS, contourLevels, cW, cH, PL, PT),
+        [heightmap, cW, cH]
+    );
+
+    // Elevation spot labels
+    const spotLabels = useMemo(() => {
+        const spots = [
+            [5, 2], [3, 4], [8, 3], [6, 5], [2, 2], [9, 5], [4, 1], [7, 4],
+        ] as [number, number][];
+        const idx = (r: number, c: number) => r * (COLS + 1) + c;
+        return spots
+            .map(([c, r]) => {
+                const h = heightmap[idx(r, c)] ?? 0;
+                if (h < 0.38) return null;
+                return {
+                    x: PL + c * cW,
+                    y: PT + r * cH - 4,
+                    m: Math.round(h * 3100 + 180),
+                    bright: h > 0.72,
+                };
+            })
+            .filter(Boolean) as { x: number; y: number; m: number; bright: boolean }[];
+    }, [heightmap, cW, cH]);
+
+    // Unit pixel coords
+    const unitCoords = units.map(u => {
+        const isF = u.type === 'FRIENDLY' || u.allianceRole === 'FRIENDLY';
+        const isE = u.type === 'ENEMY' || u.allianceRole === 'ENEMY';
+        const activeMove = ['Infantry', 'Mechanized', 'Armor', 'Recon'].includes((u as any).assetClass || '');
+
+        let targetX = u.x;
+        let targetY = u.y;
+
+        if (activeMove) {
+            let possibleTargets = units.filter(t => t.id !== u.id);
+            if (isF) {
+                possibleTargets = possibleTargets.filter(t => t.type === 'ENEMY' || t.allianceRole === 'ENEMY' || t.type === 'OBJECTIVE' || (t as any).assetClass === 'Objective');
+            } else if (isE) {
+                possibleTargets = possibleTargets.filter(t => t.type === 'FRIENDLY' || t.allianceRole === 'FRIENDLY' || t.type === 'OBJECTIVE' || (t as any).assetClass === 'Objective');
+            }
+
+            let bestDist = Infinity;
+            let bestTarget: any = null;
+            possibleTargets.forEach(t => {
+                const distSq = (t.x - u.x) ** 2 + (t.y - u.y) ** 2;
+                if (distSq < bestDist) {
+                    bestDist = distSq;
+                    bestTarget = t;
+                }
+            });
+
+            if (bestTarget) {
+                const dist = Math.sqrt(bestDist);
+                if (dist > 0) {
+                    // Route ~40% of the way or up to 7 grid cells to illustrate vector intention graphically
+                    const travelDist = Math.max(1, Math.min(dist * 0.4, 7));
+                    targetX = Math.round(u.x + ((bestTarget.x - u.x) / dist) * travelDist);
+                    targetY = Math.round(u.y + ((bestTarget.y - u.y) / dist) * travelDist);
+                }
+            } else {
+                // Fallback deterministic patrol
+                const hash = u.id.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
+                targetX = Math.max(1, Math.min(COLS, u.x + (hash % 11) - 5));
+                targetY = Math.max(1, Math.min(ROWS, u.y + ((hash >> 2) % 11) - 5));
+            }
+        }
+
+        targetX = Math.max(1, Math.min(COLS, targetX));
+        targetY = Math.max(1, Math.min(ROWS, targetY));
+
+        return {
+            ...u,
+            px: PL + ((u.x - 0.5) / COLS) * mapW,
+            py: PT + ((u.y - 0.5) / ROWS) * mapH,
+            tpx: PL + ((targetX - 0.5) / COLS) * mapW,
+            tpy: PT + ((targetY - 0.5) / ROWS) * mapH,
+            hasTarget: activeMove && (targetX !== u.x || targetY !== u.y)
+        };
+    });
+
+    const colAxis = Array.from({ length: COLS }, (_, i) => i + 1);
+    const rowAxis = Array.from({ length: ROWS }, (_, i) => String(i + 1).padStart(2, '0'));
+
+    return (
+        <div className="relative w-full h-full overflow-hidden" style={{ background: tc.bg }}>
+
+            {/* ── Top-left badge ── */}
+            <div className="absolute top-3 left-3 z-20 pointer-events-none flex items-center gap-1.5 px-2 py-1 rounded-sm"
+                style={{ background: 'rgba(0,0,0,0.72)', border: `1px solid ${tc.infoColor}30` }}>
+                <div className="w-1.5 h-1.5 rounded-full animate-pulse"
+                    style={{ background: tc.infoColor, boxShadow: `0 0 6px ${tc.infoColor}` }} />
+                <span className="text-[8px] font-mono font-bold uppercase tracking-widest" style={{ color: tc.infoColor }}>
+                    {tc.label}
+                </span>
+                <span className="text-[7px] font-mono ml-1 opacity-60" style={{ color: tc.infoColor }}>
+                    {tc.elevTag}
+                </span>
+            </div>
+
+            {/* ── Scenario title ── */}
+            {scenarioTitle && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+                    <div className="px-3 py-1 rounded-sm" style={{
+                        background: 'rgba(0,0,0,0.80)',
+                        border: '1px solid rgba(31,111,235,0.25)',
+                        backdropFilter: 'blur(4px)',
+                    }}>
+                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-[#E6EDF3]">
+                            {scenarioTitle}
+                        </span>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Unit count badge ── */}
+            <div className="absolute top-3 right-3 z-20 pointer-events-none">
+                <div className="px-2 py-1 rounded-sm"
+                    style={{ background: 'rgba(0,0,0,0.72)', border: `1px solid ${tc.gridLine}` }}>
+                    <span className="text-[8px] font-mono" style={{ color: tc.infoColor }}>
+                        {units.filter(u => u.type === 'FRIENDLY').length}F&nbsp;&nbsp;
+                        {units.filter(u => u.type === 'ENEMY').length}H&nbsp;&nbsp;
+                        {units.filter(u => u.type === 'OBJECTIVE').length}OBJ
+                    </span>
+                </div>
+            </div>
+
+            {/* ── SVG map ── */}
+            <svg
+                ref={svgRef}
+                className={`absolute inset-0 w-full h-full outline-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} touch-none`}
+                viewBox={`0 0 ${VW} ${VH}`}
+                preserveAspectRatio="xMidYMid meet"
+                xmlns="http://www.w3.org/2000/svg"
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onPointerLeave={handlePointerUp}
+            >
+                <defs>
+                    <filter id="f-faint" x="-25%" y="-25%" width="150%" height="150%">
+                        <feGaussianBlur stdDeviation="1.8" result="b" />
+                        <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                    </filter>
+                    <filter id="f-bright" x="-60%" y="-60%" width="220%" height="220%">
+                        <feGaussianBlur stdDeviation="5" result="b" />
+                        <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                    </filter>
+                    <filter id="f-unit" x="-80%" y="-80%" width="260%" height="260%">
+                        <feGaussianBlur stdDeviation="3" result="b" />
+                        <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                    </filter>
+                    <radialGradient id="cg" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stopColor={tc.infoColor} stopOpacity="0.07" />
+                        <stop offset="100%" stopColor={tc.infoColor} stopOpacity="0" />
+                    </radialGradient>
+                </defs>
+
+                <g transform={`translate(${VW / 2 + panX}, ${VH / 2 + panY}) scale(${zoom}) translate(${-VW / 2}, ${-VH / 2})`}>
+
+                    {/* Centre radial glow */}
+                    <rect x={PL} y={PT} width={mapW} height={mapH} fill="url(#cg)" />
+
+                    {/* ── Terrain cell fills ── */}
+                    {cellFills.map((c, i) => (
+                        <rect key={i} x={c.x} y={c.y} width={cW + 0.6} height={cH + 0.6} fill={c.fill} />
+                    ))}
+
+                    {/* ── Contour lines ── */}
+                    {contourPaths.map((d, i) =>
+                        d ? (
+                            <path
+                                key={i}
+                                d={d}
+                                fill="none"
+                                stroke={contourColors[i]}
+                                strokeWidth={contourWidths[i]}
+                                strokeLinecap="round"
+                                filter={contourGlow[i] ? 'url(#f-bright)' : 'url(#f-faint)'}
+                            />
+                        ) : null
+                    )}
+
+                    {/* ── Elevation spot labels ── */}
+                    {spotLabels.map((s, i) => (
+                        <text
+                            key={i} x={s.x} y={s.y}
+                            fontSize="6" fontFamily="monospace" textAnchor="middle"
+                            fill={s.bright ? tc.contourPeak : tc.contour1}
+                            opacity="0.70"
+                        >
+                            {s.m}m
+                        </text>
+                    ))}
+
+                    {/* ── Grid lines ── */}
+                    {colAxis.map((_, i) => (
+                        <line key={`v${i}`}
+                            x1={PL + i * cW} y1={PT}
+                            x2={PL + i * cW} y2={PT + mapH}
+                            stroke={tc.gridLine} strokeWidth="0.4" />
+                    ))}
+                    {rowAxis.map((_, i) => (
+                        <line key={`h${i}`}
+                            x1={PL} y1={PT + i * cH}
+                            x2={PL + mapW} y2={PT + i * cH}
+                            stroke={tc.gridLine} strokeWidth="0.4" />
+                    ))}
+
+                    {/* Map border */}
+                    <rect x={PL} y={PT} width={mapW} height={mapH}
+                        fill="none" stroke={tc.gridLine} strokeWidth="1" />
+
+                    {/* ── Axis labels ── */}
+                    {colAxis.map((n, i) => (
+                        i % 2 === 0 ? (
+                            <text key={`cl${i}`}
+                                x={PL + (i + 0.5) * cW} y={PT - 9}
+                                fontSize="5.5" fontFamily="monospace" textAnchor="middle"
+                                fill={tc.axisText}>
+                                {n}
+                            </text>
+                        ) : null
+                    ))}
+                    {rowAxis.map((ch, i) => (
+                        i % 2 === 0 ? (
+                            <text key={`rl${i}`}
+                                x={PL - 12} y={PT + (i + 0.5) * cH + 2}
+                                fontSize="5.5" fontFamily="monospace" textAnchor="middle"
+                                fill={tc.axisText}>
+                                {ch}
+                            </text>
+                        ) : null
+                    ))}
+
+                    {/* ── Corner brackets ── */}
+                    {[
+                        [PL + 14, PT, PL, PT, PL, PT + 14],
+                        [PL + mapW - 14, PT, PL + mapW, PT, PL + mapW, PT + 14],
+                        [PL + 14, PT + mapH, PL, PT + mapH, PL, PT + mapH - 14],
+                        [PL + mapW - 14, PT + mapH, PL + mapW, PT + mapH, PL + mapW, PT + mapH - 14],
+                    ].map((pts, i) => (
+                        <path key={`br${i}`}
+                            d={`M${pts[0]},${pts[1]}L${pts[2]},${pts[3]}L${pts[4]},${pts[5]}`}
+                            fill="none" stroke="rgba(31,111,235,0.65)" strokeWidth="1.5" />
+                    ))}
+
+                    {/* ── Units ── */}
+                    {unitCoords.map(unit => {
+                        const isF = unit.type === 'FRIENDLY' || unit.allianceRole === 'FRIENDLY';
+                        const isE = unit.type === 'ENEMY' || unit.allianceRole === 'ENEMY';
+                        const col = isF ? '#3B82F6' : isE ? '#EF4444' : '#F59E0B'; // Blue for friendly, Red for threat
+                        const glowCol = isF
+                            ? 'rgba(59,130,246,0.55)'
+                            : isE ? 'rgba(239,68,68,0.55)' : 'rgba(245,158,11,0.55)';
+                        const shortLabel = unit.label.length > 20
+                            ? unit.label.slice(0, 18) + '…'
+                            : unit.label;
+                        const lblW = shortLabel.length * 4.4 + 8;
+
+                        const isMoving = ['Infantry', 'Mechanized', 'Armor', 'Recon'].includes(unit.assetClass || '');
+                        const isBase = ['Infrastructure', 'Command Unit', 'Logistics'].includes(unit.assetClass || '');
+                        const isObj = unit.assetClass === 'Objective' || unit.type === 'OBJECTIVE';
+
+                        return (
+                            <g
+                                key={unit.id}
+                                filter="url(#f-unit)"
+                                onPointerEnter={() => setHoveredUnit(unit as any)}
+                                onPointerLeave={() => setHoveredUnit(null)}
+                                style={{ cursor: 'pointer' }}
+                            >
+                                {/* Invisible Hit-box (Larger Interaction Area) */}
+                                <circle cx={unit.px} cy={unit.py} r="16" fill="transparent" />
+
+                                {/* Movement Arrow */}
+                                {unit.hasTarget && (
+                                    <g opacity="0.6">
+                                        <line x1={unit.px} y1={unit.py} x2={unit.tpx} y2={unit.tpy}
+                                            stroke={col} strokeWidth="1" strokeDasharray="2 3" />
+                                        <circle cx={unit.tpx} cy={unit.tpy} r="1.2" fill={col} />
+                                    </g>
+                                )}
+
+                                {/* Pulse ring */}
+                                <circle cx={unit.px} cy={unit.py} r="9"
+                                    fill="none" stroke={glowCol} strokeWidth="0.5" opacity="0.6" />
+                                <circle cx={unit.px} cy={unit.py} r="4.5"
+                                    fill="none" stroke={glowCol} strokeWidth="0.3" opacity="0.4" />
+
+                                {/* Marker Geometry */}
+                                {isMoving && (
+                                    <polygon points={`${unit.px},${unit.py - 4.5} ${unit.px - 4.5},${unit.py + 3} ${unit.px + 4.5},${unit.py + 3}`}
+                                        fill={col} opacity="0.95" />
+                                )}
+
+                                {isBase && (
+                                    <polygon points={`${unit.px},${unit.py - 5} ${unit.px - 4},${unit.py - 1} ${unit.px - 4},${unit.py + 3.5} ${unit.px + 4},${unit.py + 3.5} ${unit.px + 4},${unit.py - 1}`}
+                                        fill={col} opacity="0.95" />
+                                )}
+
+                                {isObj && (
+                                    <>
+                                        <circle cx={unit.px} cy={unit.py} r="4"
+                                            fill="none" stroke={col} strokeWidth="1.2" opacity="0.95" />
+                                        <circle cx={unit.px} cy={unit.py} r="1.5" fill={col} opacity="0.95" />
+                                    </>
+                                )}
+
+                            </g>
+                        );
+                    })}
+                </g>
+            </svg>
+
+            {/* ── Bottom bar ── */}
+            <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
+                <div className="flex items-center gap-3">
+                    <span className="text-[7px] font-mono uppercase tracking-wider opacity-60" style={{ color: tc.infoColor }}>
+                        SCALE 1:50,000
+                    </span>
+                    <span className="text-[7px] font-mono uppercase opacity-50" style={{ color: tc.infoColor }}>
+                        ELEV_MAP v3.2
+                    </span>
+                </div>
+                <div className="flex items-center gap-4">
+                    {[
+                        { col: '#3B82F6', shape: 'sq', label: 'Friendly' },
+                        { col: '#EF4444', shape: 'sq', label: 'Threat' },
+                        { col: '#F59E0B', shape: 'circ', label: 'Objective' },
+                        { col: '#A1A1AA', shape: 'tri', label: 'Troops' },
+                        { col: '#A1A1AA', shape: 'hut', label: 'Outpost' },
+                        { col: tc.infoColor, shape: 'line', label: 'Contour' },
+                    ].map((L, i) => (
+                        <div key={i} className="flex items-center gap-1.5 opacity-80">
+                            {L.shape === 'sq' && <div className="w-2 h-2 rounded-sm" style={{ background: L.col }} />}
+                            {L.shape === 'tri' && <div className="w-0 h-0 border-l-[3.5px] border-l-transparent border-r-[3.5px] border-r-transparent border-b-[6px]" style={{ borderBottomColor: L.col }} />}
+                            {L.shape === 'hut' && <svg width="8" height="8" viewBox="0 0 7 7"><polygon points="3.5,0.5 0.5,3.5 0.5,6.5 6.5,6.5 6.5,3.5" fill={L.col} /></svg>}
+                            {L.shape === 'circ' && <div className="w-2 h-2 rounded-full border-2 border-current" style={{ color: L.col }} />}
+                            {L.shape === 'line' && <div className="w-3 h-px" style={{ background: L.col }} />}
+                            <span className="text-[6px] font-mono uppercase text-[#E6EDF3]">{L.label}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* ── Hover Tooltip ── */}
+            {hoveredUnit && (
+                <div
+                    className="fixed z-50 pointer-events-none px-3 py-2 rounded-sm shadow-xl backdrop-blur-sm"
+                    style={{
+                        left: mouseClient.x + 15,
+                        top: mouseClient.y + 15,
+                        background: 'rgba(2, 6, 15, 0.90)',
+                        border: '1px solid rgba(31, 111, 235, 0.5)'
+                    }}
+                >
+                    <div className="text-[11px] font-mono font-bold text-white mb-1.5 whitespace-nowrap">
+                        {hoveredUnit.label}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-[9px] font-mono font-bold tracking-widest uppercase" style={{ color: hoveredUnit.type === 'FRIENDLY' || hoveredUnit.allianceRole === 'FRIENDLY' ? '#3B82F6' : hoveredUnit.type === 'ENEMY' || hoveredUnit.allianceRole === 'ENEMY' ? '#EF4444' : '#F59E0B' }}>
+                            {hoveredUnit.allianceRole || hoveredUnit.type} — {hoveredUnit.assetClass || 'Unknown'}
+                        </span>
+                        <span className="text-[9px] font-mono text-gray-400">
+                            Grid Reference: [{hoveredUnit.x}, {hoveredUnit.y}]
+                        </span>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}

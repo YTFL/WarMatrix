@@ -1,6 +1,26 @@
+"""
+WarMatrix AI Backend Server
+──────────────────────────
+Serves POST /api/sitrep — forwards prompts to the fine-tuned wargaming LLM
+and returns generated SITREP text.
+
+Speed knobs (env vars):
+  MAX_NEW_TOKENS   int   Default output token cap  (default: 150)
+  USE_CACHE        bool  Enable KV cache            (default: true)  ← biggest win
+  DO_SAMPLE        bool  Sampling vs greedy decode  (default: false) ← greedy is faster
+  TEMPERATURE      float Sampling temp              (default: 0.7)
+  TOP_P            float Nucleus sampling           (default: 0.9)
+  LOAD_IN_4BIT     bool  4-bit NF4 quantisation    (default: true)
+  MAX_GPU_MEMORY_GB float GPU memory cap in GiB    (default: 4.5)
+  COMPUTE_DTYPE    str   bfloat16|float16|float32   (default: float16)
+"""
+
 import json
 import os
+import sys
 import threading
+import time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -9,23 +29,44 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-HOST = "127.0.0.1"
-PORT = 8000
-MODEL_PATH = os.environ.get("MODEL_PATH", "..\\wargame_final_outputs\\checkpoint-125")
-MAX_SEQ_LENGTH = 2048
-LOAD_IN_4BIT = os.environ.get("LOAD_IN_4BIT", "true").strip().lower() in {"1", "true", "yes", "on"}
-USE_8BIT = os.environ.get("USE_8BIT", "false").strip().lower() in {"1", "true", "yes", "on"}
-CPU_OFFLOAD = os.environ.get("CPU_OFFLOAD", "true").strip().lower() in {"1", "true", "yes", "on"}
-MAX_GPU_MEMORY_GB = float(os.environ.get("MAX_GPU_MEMORY_GB", "4.5"))
-COMPUTE_DTYPE = os.environ.get("COMPUTE_DTYPE", "float16").strip().lower()
-INFERENCE_USE_CACHE = os.environ.get("INFERENCE_USE_CACHE", "false").strip().lower() in {"1", "true", "yes", "on"}
-EMPTY_CUDA_CACHE_AFTER_REQUEST = os.environ.get("EMPTY_CUDA_CACHE_AFTER_REQUEST", "true").strip().lower() in {"1", "true", "yes", "on"}
+# ─── Config ───────────────────────────────────────────────────────────────────
 
-_model = None
-_tokenizer = None
-_model_lock = threading.Lock()
+HOST                       = "127.0.0.1"
+PORT                       = 8000
+MODEL_PATH                 = os.environ.get("MODEL_PATH", "..\\wargame_final_outputs\\checkpoint-125")
+MAX_SEQ_LENGTH             = 2048
+LOAD_IN_4BIT               = os.environ.get("LOAD_IN_4BIT",  "true").strip().lower()  in {"1", "true", "yes", "on"}
+USE_8BIT                   = os.environ.get("USE_8BIT",      "false").strip().lower() in {"1", "true", "yes", "on"}
+MAX_GPU_MEMORY_GB          = float(os.environ.get("MAX_GPU_MEMORY_GB", "4.5"))
+COMPUTE_DTYPE              = os.environ.get("COMPUTE_DTYPE", "float16").strip().lower()
+EMPTY_CUDA_CACHE           = os.environ.get("EMPTY_CUDA_CACHE_AFTER_REQUEST", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+# Generation defaults — can all be overridden per-request via JSON body
+DEFAULT_MAX_NEW_TOKENS     = int(os.environ.get("MAX_NEW_TOKENS", "150"))   # lower = faster
+DEFAULT_USE_CACHE          = os.environ.get("USE_CACHE",    "true").strip().lower()  in {"1", "true", "yes", "on"}
+DEFAULT_DO_SAMPLE          = os.environ.get("DO_SAMPLE",    "false").strip().lower() in {"1", "true", "yes", "on"}
+DEFAULT_TEMPERATURE        = float(os.environ.get("TEMPERATURE", "0.7"))
+DEFAULT_TOP_P              = float(os.environ.get("TOP_P", "0.9"))
+DEFAULT_REPETITION_PENALTY = float(os.environ.get("REPETITION_PENALTY", "1.1"))
+
+_model        = None
+_tokenizer    = None
+_model_lock   = threading.Lock()
 _resolved_model_path = None
 
+# ─── Logging helpers ──────────────────────────────────────────────────────────
+
+def _ts() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+def log(msg: str) -> None:
+    print(f"[{_ts()}] {msg}", flush=True)
+
+def log_section(title: str) -> None:
+    bar = "─" * (60 - len(title) - 3)
+    print(f"\n[{_ts()}] ── {title} {bar}", flush=True)
+
+# ─── Model helpers ────────────────────────────────────────────────────────────
 
 def _get_base_model_name(adapter_path: str) -> str:
     adapter_config_path = Path(adapter_path) / "adapter_config.json"
@@ -42,35 +83,39 @@ def _resolve_model_path(model_path: str) -> str:
     if requested.is_absolute():
         candidates.append(requested)
     else:
-        # Support running from either ai_server or another current working directory.
         candidates.append(Path.cwd() / requested)
         candidates.append(ai_server_dir / requested)
 
-    # Common fallbacks for local workspace layouts.
     candidates.append(ai_server_dir.parent.parent / "wargaming_llm" / "wargame_final_outputs" / "checkpoint-125")
     if len(ai_server_dir.parents) >= 3:
         candidates.append(ai_server_dir.parents[2] / "wargaming_llm" / "wargame_final_outputs" / "checkpoint-125")
 
-    deduped = []
-    seen = set()
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        key = str(resolved).lower()
+    deduped, seen = [], set()
+    for c in candidates:
+        key = str(c.resolve()).lower()
         if key not in seen:
-            deduped.append(resolved)
+            deduped.append(c.resolve())
             seen.add(key)
 
-    for candidate in deduped:
-        if (candidate / "adapter_config.json").exists():
-            return str(candidate)
+    for c in deduped:
+        if (c / "adapter_config.json").exists():
+            return str(c)
 
-    searched = "\n".join(f"- {p}" for p in deduped)
+    searched = "\n".join(f"  - {p}" for p in deduped)
     raise FileNotFoundError(
         "Could not find adapter checkpoint (adapter_config.json missing).\n"
-        "Set MODEL_PATH to your checkpoint folder, for example:\n"
+        "Set MODEL_PATH to your checkpoint folder, e.g.:\n"
         "  $env:MODEL_PATH='C:\\models\\wargame_final_outputs\\checkpoint-125'\n"
         f"Searched:\n{searched}"
     )
+
+
+def _resolve_compute_dtype() -> torch.dtype:
+    if COMPUTE_DTYPE == "bfloat16":
+        return torch.bfloat16
+    if COMPUTE_DTYPE == "float32":
+        return torch.float32
+    return torch.float16
 
 
 def build_prompt(instruction: str, battlefield_data: str) -> str:
@@ -85,26 +130,15 @@ def build_prompt(instruction: str, battlefield_data: str) -> str:
 
 
 def clean_response_text(text: str) -> str:
-    # Remove chain-of-thought style blocks if model emits them.
     if "<think>" in text and "</think>" in text:
         start = text.find("<think>")
         end = text.find("</think>") + len("</think>")
         text = (text[:start] + text[end:]).strip()
-
-    # If model outputs a leading marker line, strip it.
     if text.startswith("Response:"):
-        text = text[len("Response:") :].strip()
-
+        text = text[len("Response:"):].strip()
     return text.strip()
 
-
-def _resolve_compute_dtype() -> torch.dtype:
-    if COMPUTE_DTYPE == "bfloat16":
-        return torch.bfloat16
-    if COMPUTE_DTYPE == "float32":
-        return torch.float32
-    return torch.float16
-
+# ─── Model loading ────────────────────────────────────────────────────────────
 
 def load_model() -> None:
     global _model, _tokenizer, _resolved_model_path
@@ -113,13 +147,19 @@ def load_model() -> None:
 
     _resolved_model_path = _resolve_model_path(MODEL_PATH)
     base_model_name = _get_base_model_name(_resolved_model_path)
+
+    log(f"Adapter path : {_resolved_model_path}")
+    log(f"Base model   : {base_model_name}")
+
+    log("Loading tokenizer…")
     _tokenizer = AutoTokenizer.from_pretrained(_resolved_model_path, trust_remote_code=True)
 
-    has_cuda = torch.cuda.is_available()
-    model_kwargs = {"trust_remote_code": True}
+    has_cuda     = torch.cuda.is_available()
     compute_dtype = _resolve_compute_dtype()
+    model_kwargs = {"trust_remote_code": True}
 
     if has_cuda and LOAD_IN_4BIT and not USE_8BIT:
+        log(f"Quantisation : 4-bit NF4  compute={COMPUTE_DTYPE}")
         model_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=compute_dtype,
@@ -128,94 +168,138 @@ def load_model() -> None:
         )
         model_kwargs["device_map"] = "auto"
     elif has_cuda and USE_8BIT:
-        model_kwargs["quantization_config"] = BitsAndBytesConfig(
-            load_in_8bit=True,
-            llm_int8_enable_fp32_cpu_offload=CPU_OFFLOAD,
-        )
+        log(f"Quantisation : 8-bit  compute={COMPUTE_DTYPE}")
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
         model_kwargs["device_map"] = "auto"
     elif has_cuda:
+        log(f"Full precision  dtype={COMPUTE_DTYPE}  GPU")
         model_kwargs["torch_dtype"] = compute_dtype
         model_kwargs["device_map"] = "auto"
     else:
+        log("No CUDA — running on CPU (will be slow)")
         model_kwargs["torch_dtype"] = torch.float32
 
     if has_cuda:
-        # Leave headroom on 6 GB cards so other GPU work can run while the server is alive.
         gpu_mem_mb = max(int(MAX_GPU_MEMORY_GB * 1024), 1024)
-        model_kwargs["max_memory"] = {0: f"{gpu_mem_mb}MiB", "cpu": "48GiB"}
+        max_mem_map: dict = {}
+        try:
+            cuda_count = torch.cuda.device_count()
+        except Exception:
+            cuda_count = 1
+        for i in range(max(1, cuda_count)):
+            max_mem_map[i] = f"{gpu_mem_mb}MiB"
+        max_mem_map["cpu"] = "48GiB"
+        model_kwargs["max_memory"] = max_mem_map
+        if os.environ.get("FORCE_CPU", "").strip().lower() in {"1", "true", "yes", "on"}:
+            model_kwargs["device_map"] = {"": "cpu"}
 
-    if CPU_OFFLOAD:
-        offload_dir = Path(__file__).resolve().parent / "offload"
-        offload_dir.mkdir(parents=True, exist_ok=True)
-        model_kwargs["offload_folder"] = str(offload_dir)
-
-    # Lower peak host RAM usage during weight loading on Windows.
     model_kwargs["low_cpu_mem_usage"] = True
-    model_kwargs["offload_state_dict"] = True
 
+    log("Loading base model weights…")
+    t0 = time.perf_counter()
     try:
         base_model = AutoModelForCausalLM.from_pretrained(base_model_name, **model_kwargs)
+        log("Applying LoRA adapter…")
         _model = PeftModel.from_pretrained(base_model, _resolved_model_path)
         _model.eval()
     except OSError as exc:
         err = str(exc)
         if "os error 1455" in err.lower() or "paging file is too small" in err.lower():
             raise RuntimeError(
-                "Model load failed due to low Windows virtual memory (paging file). "
-                "Increase page file size (System managed or >= 32 GB), then restart the backend. "
-                "If needed, set LOAD_IN_4BIT=False to reduce loader complexity."
+                "Model load failed — Windows paging file too small. "
+                "Set system-managed page file (>= 32 GB) and restart."
             ) from exc
         raise
 
+    elapsed = time.perf_counter() - t0
+    device_name = torch.cuda.get_device_name(0) if has_cuda else "CPU"
+    log(f"Model ready in {elapsed:.1f}s  device={device_name}")
+
+# ─── Inference ────────────────────────────────────────────────────────────────
 
 def generate_sitrep(
     instruction: str,
     battlefield_data: str,
-    max_new_tokens: int = 384,
-    temperature: float = 0.45,
-    top_p: float = 0.9,
-    repetition_penalty: float = 1.1,
+    max_new_tokens: int  = DEFAULT_MAX_NEW_TOKENS,
+    use_cache: bool      = DEFAULT_USE_CACHE,
+    do_sample: bool      = DEFAULT_DO_SAMPLE,
+    temperature: float   = DEFAULT_TEMPERATURE,
+    top_p: float         = DEFAULT_TOP_P,
+    repetition_penalty: float = DEFAULT_REPETITION_PENALTY,
 ) -> str:
     if _model is None or _tokenizer is None:
         raise RuntimeError("Model is not loaded")
 
     prompt = build_prompt(instruction=instruction, battlefield_data=battlefield_data)
+    prompt_tokens = len(_tokenizer.encode(prompt))
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # ── Terminal output ──────────────────────────────────────────────────────
+    log_section("INCOMING REQUEST")
+    log(f"Instruction  : {instruction[:120]}{'…' if len(instruction) > 120 else ''}")
+    log(f"Battlefield  : {battlefield_data[:120]}{'…' if len(battlefield_data) > 120 else ''}")
+    log(f"Settings     : max_new_tokens={max_new_tokens}  use_cache={use_cache}  "
+        f"do_sample={do_sample}  temp={temperature}  top_p={top_p}")
+    log(f"Prompt tokens: {prompt_tokens}  |  device={device}")
+    log("Generating…")
+
+    t_start = time.perf_counter()
+
+    gen_kwargs: dict = {
+        "max_new_tokens":    max_new_tokens,
+        "use_cache":         use_cache,
+        "eos_token_id":      _tokenizer.eos_token_id,
+        "pad_token_id":      _tokenizer.eos_token_id,
+    }
+    if do_sample:
+        gen_kwargs["do_sample"]   = True
+        gen_kwargs["temperature"] = temperature
+        gen_kwargs["top_p"]       = top_p
+    else:
+        gen_kwargs["do_sample"] = False   # greedy — fastest
 
     with _model_lock:
         inputs = _tokenizer(text=[prompt], return_tensors="pt").to(device)
+        input_len = inputs["input_ids"].shape[1]
+
         with torch.inference_mode():
-            outputs = _model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                use_cache=INFERENCE_USE_CACHE,
-                temperature=temperature,
-                top_p=top_p,
-                repetition_penalty=repetition_penalty,
-                no_repeat_ngram_size=4,
-            )
+            output_ids = _model.generate(**inputs, **gen_kwargs)
 
-    decoded = _tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-    response = decoded.split("### Response:\n")[-1].strip()
+    # Slice only the newly generated tokens (skip the prompt)
+    new_ids = output_ids[0][input_len:]
+    response_text = _tokenizer.decode(new_ids, skip_special_tokens=True)
+    response_text = clean_response_text(response_text)
 
-    if torch.cuda.is_available() and EMPTY_CUDA_CACHE_AFTER_REQUEST:
-        # Return cached allocator blocks so non-server GPU work can run concurrently.
-        del inputs
-        del outputs
+    elapsed = time.perf_counter() - t_start
+    out_tokens = len(new_ids)
+    tok_per_sec = out_tokens / elapsed if elapsed > 0 else 0
+
+    log(f"Done  {out_tokens} tokens in {elapsed:.1f}s  ({tok_per_sec:.1f} tok/s)")
+    log(f"Response preview: {response_text[:120]}{'…' if len(response_text) > 120 else ''}")
+
+    if torch.cuda.is_available() and EMPTY_CUDA_CACHE:
+        del inputs, output_ids, new_ids
         torch.cuda.empty_cache()
 
-    return clean_response_text(response)
+    return response_text
 
+# ─── HTTP Handler ─────────────────────────────────────────────────────────────
 
 class BackendHandler(BaseHTTPRequestHandler):
+
+    # Silence the default per-request access log — we print our own
+    def log_message(self, fmt, *args):  # type: ignore[override]
+        pass
+
+    def log_request(self, code="-", size="-"):  # type: ignore[override]
+        pass
+
     def _normalized_path(self) -> str:
-        parsed = urlparse(self.path)
-        path = parsed.path.rstrip("/")
+        path = urlparse(self.path).path.rstrip("/")
         return path if path else "/"
 
     def _query_params(self) -> dict:
-        parsed = urlparse(self.path)
-        return parse_qs(parsed.query)
+        return parse_qs(urlparse(self.path).query)
 
     def _send_json(self, status_code: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -235,81 +319,43 @@ class BackendHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
+    # ── GET ───────────────────────────────────────────────────────────────────
+
     def do_GET(self) -> None:
-        path = self._normalized_path()
+        path  = self._normalized_path()
         query = self._query_params()
 
         if path == "/":
-            self._send_json(
-                200,
-                {
-                    "ok": True,
-                    "service": "wargaming-backend",
-                    "message": "Use /health, /api/echo, or /api/sitrep",
-                    "endpoints": {
-                        "GET": ["/", "/health", "/api/echo", "/api/sitrep"],
-                        "POST": ["/api/echo", "/api/sitrep"],
-                    },
-                },
-            )
+            self._send_json(200, {
+                "ok": True, "service": "wargaming-backend",
+                "message": "Use /health, /api/echo, or /api/sitrep",
+                "endpoints": {"GET": ["/", "/health", "/api/echo"], "POST": ["/api/echo", "/api/sitrep"]},
+            })
             return
 
         if path == "/health":
-            self._send_json(
-                200,
-                {
-                    "ok": True,
-                    "service": "wargaming-backend",
-                    "model_loaded": _model is not None,
-                    "model_path": _resolved_model_path or MODEL_PATH,
-                    "device": "cuda" if torch.cuda.is_available() else "cpu",
-                },
-            )
+            log(f"Health check from {self.client_address[0]}")
+            self._send_json(200, {
+                "ok": True,
+                "service": "wargaming-backend",
+                "model_loaded": _model is not None,
+                "model_path": str(_resolved_model_path or MODEL_PATH),
+                "device": "cuda" if torch.cuda.is_available() else "cpu",
+            })
             return
 
         if path == "/api/echo":
             self._send_json(200, {"ok": True, "received": query})
             return
 
-        if path == "/api/sitrep":
-            battlefield_data = query.get("battlefield_data", [""])[0]
-            instruction = query.get("instruction", ["Generate a tactical SITREP."])[0]
-
-            if not battlefield_data:
-                self._send_json(
-                    400,
-                    {
-                        "error": "battlefield_data is required",
-                        "hint": "Send POST JSON or add ?battlefield_data=... in URL",
-                    },
-                )
-                return
-
-            max_new_tokens = int(query.get("max_new_tokens", ["220"])[0])
-            temperature = float(query.get("temperature", ["0.45"])[0])
-            top_p = float(query.get("top_p", ["0.9"])[0])
-
-            try:
-                response_text = generate_sitrep(
-                    instruction=instruction,
-                    battlefield_data=str(battlefield_data),
-                    max_new_tokens=max(32, min(max_new_tokens, 1024)),
-                    temperature=max(0.0, min(temperature, 2.0)),
-                    top_p=max(0.1, min(top_p, 1.0)),
-                )
-            except Exception as exc:
-                self._send_json(500, {"error": "inference_failed", "details": str(exc)})
-                return
-
-            self._send_json(200, {"ok": True, "response": response_text})
-            return
-
         self._send_json(404, {"error": "Not found"})
 
+    # ── POST ──────────────────────────────────────────────────────────────────
+
     def do_POST(self) -> None:
-        path = self._normalized_path()
+        path           = self._normalized_path()
         content_length = int(self.headers.get("Content-Length", 0))
-        raw_body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        raw_body       = self.rfile.read(content_length) if content_length > 0 else b"{}"
 
         try:
             body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
@@ -322,54 +368,69 @@ class BackendHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/sitrep":
-            instruction = body.get("instruction", "Generate a tactical SITREP.")
+            instruction     = body.get("instruction", "Generate a tactical SITREP.")
             battlefield_data = body.get("battlefield_data", "")
 
             if not battlefield_data:
                 self._send_json(400, {"error": "battlefield_data is required"})
                 return
 
-            max_new_tokens = int(body.get("max_new_tokens", 384))
-            temperature = float(body.get("temperature", 0.45))
-            top_p = float(body.get("top_p", 0.9))
+            # Per-request overrides (all optional)
+            max_new_tokens      = max(32, min(int(body.get("max_new_tokens",      DEFAULT_MAX_NEW_TOKENS)),     1024))
+            temperature         = max(0.0, min(float(body.get("temperature",       DEFAULT_TEMPERATURE)),        2.0))
+            top_p               = max(0.1, min(float(body.get("top_p",             DEFAULT_TOP_P)),              1.0))
+            repetition_penalty  = max(1.0, min(float(body.get("repetition_penalty", DEFAULT_REPETITION_PENALTY)), 2.0))
+            use_cache           = bool(body.get("use_cache",   DEFAULT_USE_CACHE))
+            do_sample           = bool(body.get("do_sample",   DEFAULT_DO_SAMPLE))
 
             try:
                 response_text = generate_sitrep(
                     instruction=instruction,
                     battlefield_data=str(battlefield_data),
-                    max_new_tokens=max(32, min(max_new_tokens, 1024)),
-                    temperature=max(0.0, min(temperature, 2.0)),
-                    top_p=max(0.1, min(top_p, 1.0)),
+                    max_new_tokens=max_new_tokens,
+                    use_cache=use_cache,
+                    do_sample=do_sample,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
                 )
             except Exception as exc:
+                log(f"ERROR during inference: {exc}")
                 self._send_json(500, {"error": "inference_failed", "details": str(exc)})
                 return
 
-            self._send_json(
-                200,
-                {
-                    "ok": True,
-                    "response": response_text,
-                },
-            )
+            self._send_json(200, {"ok": True, "response": response_text})
             return
 
         self._send_json(404, {"error": "Not found"})
 
+# ─── Entry point ──────────────────────────────────────────────────────────────
 
 def run() -> None:
-    print("Loading fine-tuned model...")
+    print("=" * 62, flush=True)
+    print("  WarMatrix AI Backend Server", flush=True)
+    print(f"  Python {sys.version.split()[0]}  |  PyTorch {torch.__version__}", flush=True)
+    print(f"  CUDA available : {torch.cuda.is_available()}", flush=True)
+    if torch.cuda.is_available():
+        print(f"  GPU            : {torch.cuda.get_device_name(0)}", flush=True)
+    print(f"  Max new tokens : {DEFAULT_MAX_NEW_TOKENS}", flush=True)
+    print(f"  KV cache       : {DEFAULT_USE_CACHE}", flush=True)
+    print(f"  Sampling       : {DEFAULT_DO_SAMPLE}", flush=True)
+    print("=" * 62, flush=True)
+
+    log("Loading fine-tuned model — this may take a minute…")
     load_model()
-    print("Model loaded successfully.")
-    print(f"Using model path: {_resolved_model_path}")
 
     server = ThreadingHTTPServer((HOST, PORT), BackendHandler)
-    print(f"Backend running on http://{HOST}:{PORT}")
-    print("Endpoints:")
-    print("  GET  /health")
-    print("  POST /api/echo")
-    print("  POST /api/sitrep")
-    server.serve_forever()
+    log(f"Server listening on http://{HOST}:{PORT}")
+    log("Endpoints: GET /health  |  POST /api/sitrep  |  POST /api/echo")
+    log("Ready — waiting for requests.\n")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        log("Shutting down…")
+        server.shutdown()
 
 
 if __name__ == "__main__":
