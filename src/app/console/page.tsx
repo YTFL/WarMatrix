@@ -304,7 +304,7 @@ export default function WarMatrixPage() {
                         </TacticalWidget>
 
                         <TacticalWidget
-                            title="Secure Comms"
+                            title="Command Link"
                             icon={MessageSquare}
                             className="flex-1"
                             headerAction={

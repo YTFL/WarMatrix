@@ -25,6 +25,11 @@ import {
   AlertCircle,
   PlayCircle,
   Shuffle,
+  X,
+  Shield,
+  Crosshair,
+  Wind,
+  Map,
 } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -73,6 +78,7 @@ export default function WarMatrixPage() {
   const [isBuilderWorkspaceActive, setIsBuilderWorkspaceActive] = useState(false);
   const [builderScenarioMode, setBuilderScenarioMode] = useState<'selection' | 'random' | 'custom'>('selection');
   const [isCommsConsoleOpen, setIsCommsConsoleOpen] = useState(false);
+  const [isBriefingModalOpen, setIsBriefingModalOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [lastResult, setLastResult] = useState<{
     command: string;
@@ -412,21 +418,174 @@ export default function WarMatrixPage() {
             </div>
           </TacticalWidget>
 
-          {/* Scenario Info when active */}
+          {/* Active Scenario — clickable briefing panel */}
           {activeScenario && (
-            <TacticalWidget title="Active Scenario" icon={MapPin}>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-bold text-[#E6EDF3] leading-tight">{activeScenario.title}</span>
-                <p className="text-[8px] font-mono text-[#6B7280] leading-snug line-clamp-3">{activeScenario.briefing}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[7px] font-mono text-[#8B5CF6] uppercase">{activeScenario.terrainType}</span>
-                  <span className="text-[7px] font-mono text-[#4B5563]">·</span>
-                  <span className="text-[7px] font-mono text-[#4B5563]">{units.length} units</span>
-                </div>
+            <button
+              onClick={() => setIsBriefingModalOpen(true)}
+              className="w-full text-left group"
+              style={{
+                background: 'rgba(8,14,28,0.85)',
+                border: '1px solid rgba(31,111,235,0.22)',
+                borderRadius: '2px',
+                padding: '10px 12px',
+                transition: 'border-color 0.2s, box-shadow 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.borderColor = 'rgba(31,111,235,0.55)';
+                el.style.boxShadow = '0 0 14px rgba(31,111,235,0.08)';
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.borderColor = 'rgba(31,111,235,0.22)';
+                el.style.boxShadow = 'none';
+              }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" style={{ boxShadow: '0 0 5px #22C55E80' }} />
+                <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#3A8DFF]">Active Scenario</span>
+                <span className="ml-auto text-[7px] font-mono text-[#1F6FEB]/50 group-hover:text-[#3A8DFF] transition-colors uppercase tracking-wider">View Briefing ›</span>
               </div>
-            </TacticalWidget>
+              <span className="text-[10px] font-bold text-[#E6EDF3] leading-tight block mb-1 truncate">{activeScenario.title}</span>
+              <p className="text-[8px] font-mono text-[#6B7280] leading-snug line-clamp-2">{activeScenario.briefing}</p>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-[7px] font-mono text-[#8B5CF6] uppercase">{activeScenario.terrainType}</span>
+                <span className="text-[7px] font-mono text-[#4B5563]">·</span>
+                <span className="text-[7px] font-mono text-[#4B5563]">{units.length} units</span>
+              </div>
+            </button>
           )}
         </div>
+
+        {/* ── MISSION BRIEFING MODAL ── */}
+        {isBriefingModalOpen && activeScenario && (
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center p-6"
+            style={{ background: 'rgba(2,4,10,0.82)', backdropFilter: 'blur(6px)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) setIsBriefingModalOpen(false); }}
+          >
+            <div
+              className="relative w-full max-w-xl flex flex-col gap-0"
+              style={{
+                background: 'rgba(8,14,28,0.97)',
+                border: '1px solid rgba(31,111,235,0.35)',
+                borderRadius: '2px',
+                boxShadow: '0 0 60px rgba(31,111,235,0.12), 0 0 120px rgba(31,111,235,0.04)',
+                animation: 'hudFadeIn 0.2s ease-out',
+                maxHeight: '85vh',
+                overflowY: 'auto',
+              }}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: 'rgba(31,111,235,0.20)', background: 'rgba(12,20,40,0.80)' }}>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse" style={{ boxShadow: '0 0 6px #22C55E' }} />
+                  <span className="text-[8px] font-bold uppercase tracking-[0.3em] text-[#3A8DFF]">Mission Briefing</span>
+                </div>
+                <button
+                  onClick={() => setIsBriefingModalOpen(false)}
+                  className="w-6 h-6 flex items-center justify-center rounded-sm border border-[#1F6FEB]/20 text-[#4B6A8A] hover:text-white hover:border-[#1F6FEB]/50 transition-all"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-5 p-5">
+
+                {/* Operation Name */}
+                <div>
+                  <span className="text-[7px] font-bold uppercase tracking-[0.25em] text-[#4B6A8A] block mb-1">Operation</span>
+                  <h2 className="text-base font-headline font-bold uppercase tracking-widest text-[#E6EDF3] leading-tight">{activeScenario.title}</h2>
+                </div>
+
+                {/* Mission Description */}
+                <div style={{ borderLeft: '2px solid rgba(31,111,235,0.35)', paddingLeft: '12px' }}>
+                  <span className="text-[7px] font-bold uppercase tracking-[0.25em] text-[#4B6A8A] block mb-1.5">Mission Description</span>
+                  <p className="text-[9px] font-mono text-[#9CA3AF] leading-relaxed">{activeScenario.briefing}</p>
+                </div>
+
+                {/* Environment row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1 p-2.5 rounded-sm" style={{ background: 'rgba(31,111,235,0.06)', border: '1px solid rgba(31,111,235,0.14)' }}>
+                    <div className="flex items-center gap-1.5">
+                      <Map className="w-2.5 h-2.5 text-[#4B6A8A]" />
+                      <span className="text-[7px] font-bold uppercase tracking-wider text-[#6B7280]">Terrain</span>
+                    </div>
+                    <span className="text-[11px] font-bold font-mono text-[#E6EDF3]">{activeScenario.terrainType}</span>
+                    <span className="text-[7px] font-mono text-[#F59E0B] uppercase">Operational</span>
+                  </div>
+                  <div className="flex flex-col gap-1 p-2.5 rounded-sm" style={{ background: 'rgba(31,111,235,0.06)', border: '1px solid rgba(31,111,235,0.14)' }}>
+                    <div className="flex items-center gap-1.5">
+                      <Wind className="w-2.5 h-2.5 text-[#4B6A8A]" />
+                      <span className="text-[7px] font-bold uppercase tracking-wider text-[#6B7280]">Weather</span>
+                    </div>
+                    <span className="text-[11px] font-bold font-mono text-[#E6EDF3]">{activeScenario.weather ?? 'Partly Cloudy'}</span>
+                    <span className="text-[7px] font-mono text-[#22C55E] uppercase">Visibility Good</span>
+                  </div>
+                </div>
+
+                {/* Forces Summary */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <div className="h-px flex-1" style={{ background: 'rgba(31,111,235,0.15)' }} />
+                    <span className="text-[7px] font-bold uppercase tracking-[0.25em] text-[#4B6A8A]">Forces Summary</span>
+                    <div className="h-px flex-1" style={{ background: 'rgba(31,111,235,0.15)' }} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: 'Friendly', value: units.filter(u => u.type === 'FRIENDLY').length, color: '#3B82F6' },
+                      { label: 'Enemy', value: units.filter(u => u.type === 'ENEMY').length, color: '#EF4444' },
+                      { label: 'Objectives', value: units.filter(u => u.type === 'OBJECTIVE').length, color: '#F59E0B' },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} className="flex flex-col items-center py-2.5 rounded-sm" style={{ background: 'rgba(10,16,30,0.70)', border: '1px solid rgba(31,111,235,0.10)' }}>
+                        <span className="text-lg font-headline font-bold leading-none" style={{ color }}>{value}</span>
+                        <span className="text-[7px] font-mono text-[#4B5563] uppercase mt-1">{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Mission Objectives */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Crosshair className="w-2.5 h-2.5 text-[#F59E0B]" />
+                    <span className="text-[7px] font-bold uppercase tracking-[0.25em] text-[#4B6A8A]">Mission Objectives</span>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {units.filter(u => u.type === 'OBJECTIVE').length > 0 ? (
+                      units.filter(u => u.type === 'OBJECTIVE').map((obj, i) => (
+                        <div key={obj.id} className="flex items-center gap-2.5 p-2 rounded-sm" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
+                          <Crosshair className="w-2.5 h-2.5 text-[#F59E0B] shrink-0" />
+                          <span className="text-[9px] font-mono text-[#E6EDF3]">{obj.label}</span>
+                          <span className="ml-auto text-[7px] font-mono text-[#4B5563]">Grid [{obj.x},{obj.y}]</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-2 rounded-sm" style={{ background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.10)' }}>
+                        <p className="text-[8px] font-mono text-[#6B7280] italic">No specific objectives marked. Engage targets of opportunity.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-5 py-3 border-t flex items-center justify-between" style={{ borderColor: 'rgba(31,111,235,0.15)', background: 'rgba(8,12,24,0.60)' }}>
+                <span className="text-[7px] font-mono text-[#374151] uppercase tracking-widest">WARMATRIX // MISSION BRIEF // CLASSIFIED</span>
+                <button
+                  onClick={() => setIsBriefingModalOpen(false)}
+                  className="px-4 py-1.5 rounded-sm text-[8px] font-bold uppercase tracking-widest transition-all"
+                  style={{ background: 'rgba(31,111,235,0.15)', border: '1px solid rgba(31,111,235,0.35)', color: '#3A8DFF' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(31,111,235,0.28)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(31,111,235,0.15)'; }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* CENTER ZONE */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -568,10 +727,10 @@ export default function WarMatrixPage() {
           </div>
         </div>
 
-        {/* RIGHT ZONE: Secure Comms */}
+        {/* RIGHT ZONE: Command Link */}
         <div className="w-80 flex flex-col shrink-0">
           <TacticalWidget
-            title="Secure Comms"
+            title="Command Link"
             icon={MessageSquare}
             className="flex-1"
             headerAction={
@@ -632,7 +791,7 @@ export default function WarMatrixPage() {
                       type="text"
                       value={inputValue}
                       onChange={(e) => setInputValue(e.target.value)}
-                      placeholder={activeScenario ? 'Enter tactical directive...' : 'System ready. Enter directive...'}
+                      placeholder={activeScenario ? 'Enter tactical directive to initiate system simulation...' : 'System ready. Enter command link directive...'}
                       className="w-full h-8 bg-[#0D223A]/30 border border-[#1F6FEB]/20 rounded-sm pl-8 pr-2 text-[9px] font-mono text-white placeholder:text-[#374151] focus:outline-none focus:border-[#3A8DFF]/40 transition-all"
                       disabled={status === 'PROCESSING'}
                     />

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
     CloudRain,
     Eye,
@@ -14,6 +14,7 @@ import {
     Activity,
     Radio,
     ChevronDown,
+    ChevronRight,
     Users,
     Truck,
     PlaneTakeoff,
@@ -23,6 +24,8 @@ import {
     FileText,
     Bell,
     BookOpen,
+    MapPin,
+    Clock,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -181,6 +184,122 @@ function DataRow({
     );
 }
 
+// ─── Last Known Coords Panel ──────────────────────────────────────────────────
+
+function LastKnownCoordsPanel({ activeScenario }: { activeScenario: ActiveScenario | null }) {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const contentRef = useRef<HTMLDivElement>(null);
+    const [height, setHeight] = useState(0);
+
+    useEffect(() => {
+        if (isExpanded && contentRef.current) {
+            setHeight(contentRef.current.scrollHeight);
+        } else {
+            setHeight(0);
+        }
+    }, [isExpanded]);
+
+    // Derive coordinates from the first enemy unit on the grid
+    const primaryEnemy = useMemo(
+        () => activeScenario?.units.find(u => u.type === 'ENEMY') ?? null,
+        [activeScenario]
+    );
+
+    // Build a simple timestamp anchored to the current scenario / turn
+    const timestamp = useMemo(() => {
+        if (!activeScenario) return null;
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        return `${hh}:${mm}:${ss}Z`;
+    }, [activeScenario]);
+
+    const gridX = primaryEnemy?.x ?? null;
+    const gridY = primaryEnemy?.y ?? null;
+    const hasCoords = gridX !== null && gridY !== null;
+
+    return (
+        <div className="mt-1.5 rounded-sm overflow-hidden" style={{ border: '1px solid rgba(31,111,235,0.14)' }}>
+            {/* Sub-header, clickable */}
+            <button
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left"
+                style={{
+                    background: isExpanded ? 'rgba(31,111,235,0.10)' : 'rgba(10,14,28,0.60)',
+                    outline: 'none',
+                    transition: 'background 0.2s',
+                }}
+                onClick={() => setIsExpanded(p => !p)}
+            >
+                <MapPin className="w-2.5 h-2.5 shrink-0" style={{ color: isExpanded ? '#3A8DFF' : '#4B6A8A' }} />
+                <span
+                    className="flex-1 text-[8px] uppercase font-bold tracking-wider"
+                    style={{ color: isExpanded ? '#9CA3AF' : '#6B7280' }}
+                >
+                    Last Known Coords
+                </span>
+                {activeScenario && hasCoords && !isExpanded && (
+                    <span className="text-[8px] font-mono" style={{ color: '#C9D3E0' }}>
+                        {gridX},{gridY}
+                    </span>
+                )}
+                <ChevronRight
+                    className="w-2.5 h-2.5 shrink-0 transition-transform duration-200"
+                    style={{
+                        color: isExpanded ? '#3A8DFF' : '#4B6A8A',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                    }}
+                />
+            </button>
+
+            {/* Expandable body */}
+            <div style={{ height: `${height}px`, overflow: 'hidden', transition: 'height 0.25s cubic-bezier(0.4,0,0.2,1)' }}>
+                <div ref={contentRef} className="px-3 py-2.5" style={{ borderTop: '1px solid rgba(31,111,235,0.10)' }}>
+                    {activeScenario && hasCoords ? (
+                        <div className="flex flex-col gap-1.5">
+                            {/* Title */}
+                            <span className="text-[7px] font-bold uppercase tracking-[0.25em] text-[#4B6A8A] block">
+                                Last Known Coordinates
+                            </span>
+
+                            {/* Coordinate grid */}
+                            <div
+                                className="rounded-sm p-2.5 flex flex-col gap-1.5"
+                                style={{
+                                    background: 'rgba(239,68,68,0.06)',
+                                    border: '1px solid rgba(239,68,68,0.18)',
+                                }}
+                            >
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-[#6B7280]">X</span>
+                                    <span className="text-[13px] font-headline font-bold text-[#EF4444]">{gridX}</span>
+                                </div>
+                                <div className="h-px" style={{ background: 'rgba(239,68,68,0.12)' }} />
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-[#6B7280]">Y</span>
+                                    <span className="text-[13px] font-headline font-bold text-[#EF4444]">{gridY}</span>
+                                </div>
+                            </div>
+
+                            {/* Timestamp */}
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                                <Clock className="w-2 h-2 text-[#4B5563]" />
+                                <span className="text-[7px] font-mono text-[#4B5563] uppercase tracking-wider">
+                                    Last Update: {timestamp}
+                                </span>
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="text-[8px] font-mono text-[#374151] italic">
+                            {activeScenario ? 'No enemy units detected.' : 'No scenario active.'}
+                        </p>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ─── Sidebar Accordion Component ─────────────────────────────────────────────
 
 export function SidebarAccordion({
@@ -264,12 +383,6 @@ export function SidebarAccordion({
                         valueColor={activeScenario && enemy > 0 ? '#EF4444' : '#4B5563'}
                     />
                     <DataRow
-                        icon={MapIcon}
-                        label="Last Known Coords"
-                        value={activeScenario ? '45.02°N 122.45°E' : '—'}
-                        valueColor={activeScenario ? '#C9D3E0' : '#4B5563'}
-                    />
-                    <DataRow
                         icon={AlertTriangle}
                         label="Threat Level"
                         value={activeScenario ? (enemy > 6 ? 'CRITICAL' : enemy > 3 ? 'HIGH' : 'MODERATE') : '—'}
@@ -279,13 +392,11 @@ export function SidebarAccordion({
                                 : '#4B5563'
                         }
                     />
-                    <DataRow
-                        icon={Activity}
-                        label="Movement"
-                        value={activeScenario ? 'ADVANCING NW' : '—'}
-                        valueColor={activeScenario ? '#F59E0B' : '#4B5563'}
-                    />
                 </div>
+
+                {/* Last Known Coords — expandable coordinate block */}
+                <LastKnownCoordsPanel activeScenario={activeScenario} />
+
                 {activeScenario && (
                     <div
                         className="mt-2.5 p-2 rounded-sm"
@@ -412,109 +523,6 @@ export function SidebarAccordion({
                 )}
             </AccordionPanel>
 
-            {/* ── 5. Operations Feed ── */}
-            <AccordionPanel
-                id="ops"
-                title="Operations Feed"
-                icon={Activity}
-                activeId={activeId}
-                onToggle={handleToggle}
-                statusDot={activeScenario ? 'green' : 'gray'}
-            >
-                <div className="flex flex-col gap-1.5">
-                    {/* Recent Tactical Updates */}
-                    <div>
-                        <div className="flex items-center gap-1 mb-1">
-                            <FileText className="w-2.5 h-2.5 text-[#4B6A8A]" />
-                            <span className="text-[7px] font-bold uppercase tracking-widest text-[#6B7280]">
-                                Tactical Updates
-                            </span>
-                        </div>
-                        <div
-                            className="p-1.5 rounded-sm"
-                            style={{
-                                background: 'rgba(13,34,58,0.50)',
-                                borderLeft: '1px solid rgba(31,111,235,0.40)',
-                            }}
-                        >
-                            <p className="text-[9px] font-mono text-[#E6EDF3] leading-snug">
-                                {lastResult
-                                    ? `EXEC › ${lastResult.command}`
-                                    : activeScenario
-                                        ? `SCENARIO LIVE: ${activeScenario.title}`
-                                        : 'AWAITING_SCENARIO_LOAD'}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* System Notifications */}
-                    <div>
-                        <div className="flex items-center gap-1 mb-1">
-                            <Bell className="w-2.5 h-2.5 text-[#4B6A8A]" />
-                            <span className="text-[7px] font-bold uppercase tracking-widest text-[#6B7280]">
-                                System Notifications
-                            </span>
-                        </div>
-                        <div className="flex flex-col gap-0.5">
-                            {[
-                                { msg: activeScenario ? 'UPLINK ESTABLISHED' : 'UPLINK IDLE', color: activeScenario ? '#22C55E' : '#4B5563' },
-                                { msg: `TURN ${String(turn).padStart(3, '0')} // SYNCHRONIZED`, color: activeScenario ? '#3A8DFF' : '#4B5563' },
-                                { msg: loadingAnalysis ? 'AI ANALYZING…' : 'AI ENGINE READY', color: loadingAnalysis ? '#A78BFA' : '#4B5563' },
-                            ].map((n, i) => (
-                                <div key={i} className="flex items-center gap-1.5">
-                                    <div
-                                        className="w-1 h-1 rounded-full shrink-0"
-                                        style={{ background: n.color }}
-                                    />
-                                    <span className="text-[8px] font-mono" style={{ color: n.color }}>
-                                        {n.msg}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Mission Logs */}
-                    <div>
-                        <div className="flex items-center gap-1 mb-1">
-                            <BookOpen className="w-2.5 h-2.5 text-[#4B6A8A]" />
-                            <span className="text-[7px] font-bold uppercase tracking-widest text-[#6B7280]">
-                                Mission Logs
-                            </span>
-                        </div>
-                        <div
-                            className="p-1.5 rounded-sm"
-                            style={{
-                                background: 'rgba(10,16,30,0.60)',
-                                border: '1px solid rgba(31,111,235,0.10)',
-                            }}
-                        >
-                            {activeScenario ? (
-                                <p className="text-[8px] font-mono text-[#9CA3AF] leading-relaxed line-clamp-3">
-                                    {activeScenario.briefing}
-                                </p>
-                            ) : (
-                                <p className="text-[8px] font-mono text-[#374151] italic">
-                                    No mission loaded. Standby for briefing.
-                                </p>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Bottom status line */}
-                    <div className="flex items-center gap-1.5 mt-1">
-                        <Activity
-                            className={`w-2.5 h-2.5 ${activeScenario ? 'text-[#1F6FEB]' : 'text-[#374151]'}`}
-                            style={activeScenario ? { animation: 'pulse 2s infinite' } : {}}
-                        />
-                        <span className="text-[7px] font-mono text-[#4B5563]">
-                            {activeScenario
-                                ? 'QUEUE_EMPTY // READY_FOR_STATE_CHANGE'
-                                : 'STANDBY // AWAITING_INITIALIZATION'}
-                        </span>
-                    </div>
-                </div>
-            </AccordionPanel>
         </div>
     );
 }

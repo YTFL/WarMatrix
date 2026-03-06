@@ -85,15 +85,12 @@ const ASSET_CLASSES: { label: AssetClass; icon: React.ElementType }[] = [
   { label: 'Recon', icon: Eye },
   { label: 'Logistics', icon: Truck },
   { label: 'Command Unit', icon: Radio },
-  { label: 'Infrastructure', icon: Building2 },
-  { label: 'Objective', icon: Crosshair },
 ];
 
 const ALLIANCE_OPTIONS: { value: UnitType; label: string }[] = [
   { value: 'FRIENDLY', label: 'Friendly (Blue Team)' },
   { value: 'ENEMY', label: 'Hostile (Red Team)' },
-  { value: 'NEUTRAL', label: 'Neutral' },
-  { value: 'INFRASTRUCTURE', label: 'Civilian Infrastructure' },
+  { value: 'NEUTRAL', label: 'Objective' },
 ];
 
 const TERRAIN_TYPES: TerrainType[] = ['Desert', 'Urban', 'Mountain', 'Forest', 'Coastal', 'Arctic'];
@@ -583,7 +580,7 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
 
                   {/* ──────── LEFT: DEPLOYMENT CONTROLS ──────── */}
                   <div className="flex flex-col gap-4">
@@ -631,7 +628,7 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
                         value={newLabel}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleDeploy()}
-                        className="h-9 bg-[#0A0F1C] border-[#1F6FEB]/20 text-[11px] font-mono"
+                        className="h-9 bg-[#0A0F1C] border-[#1F6FEB]/20 text-[11px] font-mono placeholder:text-[#374151] placeholder:opacity-60"
                       />
                     </div>
 
@@ -655,21 +652,23 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
                         <div className="flex-1 space-y-1">
                           <span className="text-[7px] font-mono text-[#4B5563] uppercase">Grid X (1–44)</span>
                           <Input
-                            type="number" min={1} max={44}
+                            type="text"
+                            inputMode="numeric"
                             placeholder="X"
                             value={gridX}
                             onChange={(e) => setGridX(e.target.value)}
-                            className="h-9 bg-[#0A0F1C] border-[#1F6FEB]/20 text-[11px] font-mono"
+                            className="h-9 bg-[#0A0F1C] border-[#1F6FEB]/20 text-[11px] font-mono placeholder:text-[#374151] placeholder:opacity-60"
                           />
                         </div>
                         <div className="flex-1 space-y-1">
                           <span className="text-[7px] font-mono text-[#4B5563] uppercase">Grid Y (1–28)</span>
                           <Input
-                            type="number" min={1} max={28}
+                            type="text"
+                            inputMode="numeric"
                             placeholder="Y"
                             value={gridY}
                             onChange={(e) => setGridY(e.target.value)}
-                            className="h-9 bg-[#0A0F1C] border-[#1F6FEB]/20 text-[11px] font-mono"
+                            className="h-9 bg-[#0A0F1C] border-[#1F6FEB]/20 text-[11px] font-mono placeholder:text-[#374151] placeholder:opacity-60"
                           />
                         </div>
                       </div>
@@ -692,7 +691,7 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
                   </div>
 
                   {/* ──────── RIGHT: ACTIVE DEPLOYMENTS ──────── */}
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-3 flex-1">
                     <div className="flex items-center justify-between">
                       <h3 className="text-[9px] font-bold text-[#F59E0B] uppercase tracking-[0.25em]">Active Deployments</h3>
                       <span className="text-[8px] font-mono text-[#4B5563]">
@@ -700,7 +699,7 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
                       </span>
                     </div>
 
-                    <ScrollArea className="flex-1 bg-[#0A0A0A]/50 border border-[#1F6FEB]/10 rounded-sm p-2 min-h-[220px] max-h-[280px]">
+                    <ScrollArea className="flex-1 bg-[#0A0A0A]/50 border border-[#1F6FEB]/10 rounded-sm p-2">
                       <div className="space-y-1.5">
                         {units.map((unit) => {
                           const rs = roleStyle[unit.allianceRole || unit.type] || roleStyle['FRIENDLY'];
