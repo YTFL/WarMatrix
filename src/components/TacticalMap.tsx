@@ -32,6 +32,14 @@ export function TacticalMap({ units, movements = [], combatEvents = [] }: Tactic
   // 12x8 grid
   const gridRows = 8;
   const gridCols = 12;
+  const toPercentX = (x: number) => {
+    const safeX = Math.max(1, Math.min(gridCols, Number.isFinite(x) ? x : 1));
+    return `${((safeX - 0.5) / gridCols) * 100}%`;
+  };
+  const toPercentY = (y: number) => {
+    const safeY = Math.max(1, Math.min(gridRows, Number.isFinite(y) ? y : 1));
+    return `${((safeY - 0.5) / gridRows) * 100}%`;
+  };
 
   return (
     <div className="flex-1 relative bg-[#0A0A0A] border border-[#1F6FEB]/20 overflow-hidden">
@@ -56,30 +64,20 @@ export function TacticalMap({ units, movements = [], combatEvents = [] }: Tactic
         <span className="text-[10px] text-[#1F6FEB]/40 font-bold uppercase -rotate-6">Supply Corridor 7</span>
       </div>
 
-      {/* Movement Path (Example) */}
+      {/* Movement paths from latest simulation tick */}
       <svg className="absolute inset-0 w-full h-full pointer-events-none">
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
             <polygon points="0 0, 10 3.5, 0 7" fill="#1F6FEB" fillOpacity="0.4" />
           </marker>
         </defs>
-        <path
-          d="M 200 150 L 400 300 L 600 250"
-          stroke="#1F6FEB"
-          strokeWidth="1"
-          strokeDasharray="4 4"
-          fill="none"
-          strokeOpacity="0.4"
-          markerEnd="url(#arrowhead)"
-        />
-
         {movements.map((mv, idx) => (
           <line
             key={`${mv.unit_id}-${idx}`}
-            x1={`${(mv.from.x / gridCols) * 100}%`}
-            y1={`${(mv.from.y / gridRows) * 100}%`}
-            x2={`${(mv.to.x / gridCols) * 100}%`}
-            y2={`${(mv.to.y / gridRows) * 100}%`}
+            x1={toPercentX(mv.from.x)}
+            y1={toPercentY(mv.from.y)}
+            x2={toPercentX(mv.to.x)}
+            y2={toPercentY(mv.to.y)}
             stroke={mv.unit_id.startsWith('e') ? '#EF4444' : '#22C55E'}
             strokeWidth="1.5"
             strokeDasharray="5 4"
@@ -100,8 +98,8 @@ export function TacticalMap({ units, movements = [], combatEvents = [] }: Tactic
             key={`${ev.attacker_id}-${ev.defender_id}-${idx}`}
             className="absolute pointer-events-none"
             style={{
-              left: `${(defender.x / gridCols) * 100}%`,
-              top: `${(defender.y / gridRows) * 100}%`,
+              left: toPercentX(defender.x),
+              top: toPercentY(defender.y),
               transform: 'translate(-50%, -50%)',
             }}
           >
@@ -125,8 +123,8 @@ export function TacticalMap({ units, movements = [], combatEvents = [] }: Tactic
           key={unit.id}
           className="absolute transition-all duration-1000 ease-in-out group cursor-help"
           style={{
-            left: `${(unit.x / gridCols) * 100}%`,
-            top: `${(unit.y / gridRows) * 100}%`,
+            left: toPercentX(unit.x),
+            top: toPercentY(unit.y),
             transform: 'translate(-50%, -50%)'
           }}
         >

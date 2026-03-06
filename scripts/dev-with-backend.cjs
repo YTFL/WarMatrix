@@ -6,9 +6,6 @@ const root = process.cwd();
 const isWin = process.platform === 'win32';
 
 const npmCmd = isWin ? 'npm.cmd' : 'npm';
-const nextCmd = isWin
-  ? path.join(root, 'node_modules', '.bin', 'next.cmd')
-  : path.join(root, 'node_modules', '.bin', 'next');
 const pythonVenvPath = isWin
   ? path.join(root, '.venv', 'Scripts', 'python.exe')
   : path.join(root, '.venv', 'bin', 'python');
@@ -27,11 +24,27 @@ function prefixAndWrite(stream, label, data) {
   }
 }
 
+function quoteCmdArg(arg) {
+  if (!/[\s"]/u.test(arg)) return arg;
+  return `"${arg.replace(/"/g, '\\"')}"`;
+}
+
 function startProcess({ label, cmd, args, cwd, shell = false }) {
-  const child = spawn(cmd, args, {
+  let runCmd = cmd;
+  let runArgs = args;
+  let runShell = shell;
+
+  if (isWin) {
+    const commandLine = [cmd, ...args].map((a) => quoteCmdArg(String(a))).join(' ');
+    runCmd = 'cmd.exe';
+    runArgs = ['/d', '/s', '/c', commandLine];
+    runShell = false;
+  }
+
+  const child = spawn(runCmd, runArgs, {
     cwd,
     stdio: ['inherit', 'pipe', 'pipe'],
-    shell,
+    shell: runShell,
     env: process.env,
   });
 
@@ -83,8 +96,8 @@ process.on('SIGTERM', () => shutdown(0));
 
 startProcess({
   label: 'NEXT',
-  cmd: fs.existsSync(nextCmd) ? nextCmd : 'next',
-  args: ['dev', '--turbopack', '-p', '9002'],
+  cmd: npmCmd,
+  args: ['run', 'dev:next'],
   cwd: root,
   shell: false,
 });

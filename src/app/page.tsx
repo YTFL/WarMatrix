@@ -6,7 +6,6 @@ import { TacticalMapDisplay } from '@/components/TacticalMapDisplay';
 import { ScenarioBuilder } from '@/components/ScenarioBuilder';
 import { SecureCommsConsole, ChatMessage, MessageSource, INITIAL_LOG, nowTs } from '@/components/SecureCommsConsole';
 import { SidebarAccordion } from '@/components/SidebarAccordion';
-import { receiveStrategicAnalysis, ReceiveStrategicAnalysisOutput } from '@/ai/flows/receive-strategic-analysis';
 import { GenerateScenarioOutput } from '@/ai/flows/generate-scenario';
 import { useToast } from '@/hooks/use-toast';
 import { TacticalWidget } from '@/components/TacticalWidget';
@@ -56,6 +55,190 @@ interface ActiveScenario {
   mapPeaks?: { cx: number; cy: number; h: number; r2: number }[];
 }
 
+interface BattlefieldUnit {
+  id: string;
+  faction: 'FRIENDLY' | 'ENEMY';
+  x: number;
+  y: number;
+  label: string;
+  hp: number;
+  max_hp: number;
+  alive: boolean;
+}
+
+interface BattlefieldObjective {
+  id: string;
+  x: number;
+  y: number;
+  label: string;
+  controller: 'FRIENDLY' | 'ENEMY' | 'NEUTRAL';
+  progress_friendly: number;
+  progress_enemy: number;
+}
+
+interface BattlefieldState {
+  turn: number;
+  width: number;
+  height: number;
+  weather: string;
+  units: BattlefieldUnit[];
+  objectives: BattlefieldObjective[];
+  ended: boolean;
+  winner?: string;
+  end_reason?: string;
+}
+
+interface SimulationResponse {
+  updated_battlefield_state: BattlefieldState;
+  unit_movements: Array<{ unit_id: string; from: { x: number; y: number }; to: { x: number; y: number } }>;
+  combat_results: Array<{ attacker_id: string; defender_id: string; outcome: string; damage: number }>;
+  casualties: Array<{ unit_id: string; faction: string }>;
+  simulation_results: {
+    expected_success?: number;
+    expected_risk_operational?: number;
+    recommended_next_action?: string;
+  };
+  ai_narrative_output: string;
+  terminated: boolean;
+  termination_reason?: string;
+}
+
+interface StructuredCommandPayload {
+  action_type: 'MOVE' | 'ATTACK' | 'HOLD' | 'CAPTURE' | 'RECON' | 'DEFEND';
+  unit_id?: string;
+  target?: {
+    x?: number;
+    y?: number;
+    unit_id?: string;
+    objective_id?: string;
+  };
+  raw_input: string;
+}
+
+function mapBackendToDisplayUnits(state: BattlefieldState): Unit[] {
+  const scaleX = (x: number) => Math.max(1, Math.min(44, Math.round((x / 12) * 44)));
+  const scaleY = (y: number) => Math.max(1, Math.min(28, Math.round((y / 8) * 28)));
+
+  const units: Unit[] = state.units
+    .filter((u) => u.alive)
+    .map((u) => ({
+      id: u.id,
+      type: u.faction,
+      x: scaleX(u.x),
+      y: scaleY(u.y),
+      label: `${u.label} [${u.hp}]`,
+    }));
+
+  const objectives: Unit[] = state.objectives.map((o) => ({
+    id: o.id,
+    type: 'OBJECTIVE',
+    x: scaleX(o.x),
+    y: scaleY(o.y),
+    label: `${o.label} (${o.controller})`,
+  }));
+
+  return [...units, ...objectives];
+}
+
+function buildStructuredCommand(rawInput: string, state: BattlefieldState): StructuredCommandPayload {
+  const lower = rawInput.toLowerCase();
+
+  const inferAction = (): StructuredCommandPayload['action_type'] => {
+    if (/(attack|engage|fire|strike|assault)/i.test(lower)) return 'ATTACK';
+    if (/(capture|secure|seize|take objective)/i.test(lower)) return 'CAPTURE';
+    if (/(recon|scout|observe|survey)/i.test(lower)) return 'RECON';
+    if (/(defend|fortify|dig in|protect)/i.test(lower)) return 'DEFEND';
+    if (/(move|advance|push|maneuver|reposition)/i.test(lower)) return 'MOVE';
+    if (/(hold|wait|pause|maintain|stay)/i.test(lower)) return 'HOLD';
+    return 'HOLD';
+  };
+
+  const action_type = inferAction();
+
+  const friendlyAlive = state.units.filter((u) => u.alive && u.faction === 'FRIENDLY');
+  const enemyAlive = state.units.filter((u) => u.alive && u.faction === 'ENEMY');
+
+  const actor =
+    friendlyAlive.find((u) => lower.includes(u.id.toLowerCase()) || lower.includes(u.label.toLowerCase())) ||
+    friendlyAlive[0];
+
+  const toSimX = (x: number) => {
+    if (x <= 12) return Math.max(1, Math.min(12, x));
+    return Math.max(1, Math.min(12, Math.round((x / 44) * 12)));
+  };
+  const toSimY = (y: number) => {
+    if (y <= 8) return Math.max(1, Math.min(8, y));
+    return Math.max(1, Math.min(8, Math.round((y / 28) * 8)));
+  };
+
+  const coordMatch = lower.match(/\[(\d{1,2})\s*,\s*(\d{1,2})\]|x\s*[:=]?\s*(\d{1,2})\D+y\s*[:=]?\s*(\d{1,2})/i);
+  const parsedX = coordMatch ? Number(coordMatch[1] || coordMatch[3]) : undefined;
+  const parsedY = coordMatch ? Number(coordMatch[2] || coordMatch[4]) : undefined;
+
+  const target: StructuredCommandPayload['target'] = {};
+
+  if (parsedX !== undefined && parsedY !== undefined) {
+    target.x = toSimX(parsedX);
+    target.y = toSimY(parsedY);
+  }
+
+  const objective = state.objectives.find((o) => lower.includes(o.id.toLowerCase()) || lower.includes(o.label.toLowerCase()));
+  if (objective) {
+    target.objective_id = objective.id;
+    target.x = objective.x;
+    target.y = objective.y;
+  }
+
+  if ((action_type === 'MOVE' || action_type === 'CAPTURE' || action_type === 'RECON') && (target.x === undefined || target.y === undefined)) {
+    if (state.objectives.length > 0) {
+      const nearestObj = actor
+        ? state.objectives.reduce((best, o) => {
+            const bd = Math.hypot(best.x - actor.x, best.y - actor.y);
+            const od = Math.hypot(o.x - actor.x, o.y - actor.y);
+            return od < bd ? o : best;
+          }, state.objectives[0])
+        : state.objectives[0];
+
+      target.objective_id = nearestObj.id;
+      target.x = nearestObj.x;
+      target.y = nearestObj.y;
+    } else if (enemyAlive.length > 0) {
+      const nearestEnemy = actor
+        ? enemyAlive.reduce((best, e) => {
+            const bd = Math.hypot(best.x - actor.x, best.y - actor.y);
+            const ed = Math.hypot(e.x - actor.x, e.y - actor.y);
+            return ed < bd ? e : best;
+          }, enemyAlive[0])
+        : enemyAlive[0];
+      target.x = nearestEnemy.x;
+      target.y = nearestEnemy.y;
+    }
+  }
+
+  if (action_type === 'ATTACK' && !target.unit_id && enemyAlive.length > 0) {
+    const namedEnemy = enemyAlive.find((e) => lower.includes(e.id.toLowerCase()) || lower.includes(e.label.toLowerCase()));
+    const chosenEnemy = namedEnemy ||
+      (actor
+        ? enemyAlive.reduce((best, e) => {
+            const bd = Math.hypot(best.x - actor.x, best.y - actor.y);
+            const ed = Math.hypot(e.x - actor.x, e.y - actor.y);
+            return ed < bd ? e : best;
+          }, enemyAlive[0])
+        : enemyAlive[0]);
+
+    target.unit_id = chosenEnemy.id;
+    target.x = chosenEnemy.x;
+    target.y = chosenEnemy.y;
+  }
+
+  return {
+    action_type,
+    unit_id: actor?.id,
+    target,
+    raw_input: rawInput,
+  };
+}
+
 const WIDGET_SOURCE_STYLE: Record<MessageSource, { label: string; color: string; dot: string }> = {
   COMMAND_INPUT: { label: 'COMMANDER', color: '#E6EDF3', dot: '#9CA3AF' },
   AI_STRATEGIST: { label: 'AI STRATEGIST', color: '#3A8DFF', dot: '#1F6FEB' },
@@ -72,7 +255,7 @@ export default function WarMatrixPage() {
   const [turn, setTurn] = useState(1);
   const [status, setStatus] = useState<'ACTIVE' | 'AWAITING COMMAND' | 'PROCESSING'>('ACTIVE');
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
-  const [analysis, setAnalysis] = useState<ReceiveStrategicAnalysisOutput | null>(null);
+  const [analysis, setAnalysis] = useState<any>(null);
   const [role, setRole] = useState<'BLUE_TEAM' | 'RED_TEAM'>('BLUE_TEAM');
   const [centerScenarioMode, setCenterScenarioMode] = useState<'default' | 'random' | 'custom'>('default');
   const [isBuilderWorkspaceActive, setIsBuilderWorkspaceActive] = useState(false);
@@ -100,6 +283,11 @@ export default function WarMatrixPage() {
     enemyArmorDestroyed: 0,
     enemySupportNeutralized: 0,
   });
+
+  const [battlefieldState, setBattlefieldState] = useState<BattlefieldState | null>(null);
+  const [initialForceCounts, setInitialForceCounts] = useState({ friendly: 0, enemy: 0 });
+  const [movementEvents, setMovementEvents] = useState<SimulationResponse['unit_movements']>([]);
+  const [combatEvents, setCombatEvents] = useState<SimulationResponse['combat_results']>([]);
 
   const handleBriefingGenerated = (title: string, briefing: string) => {
     const briefingMsg: ChatMessage = {
@@ -136,60 +324,65 @@ export default function WarMatrixPage() {
   const [activeScenario, setActiveScenario] = useState<ActiveScenario | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
 
-  // ── AI Analysis (only when scenario is active) ────────────────────────────────
-  const fetchStrategicAnalysis = async () => {
-    if (!activeScenario || units.length === 0) return;
-    setLoadingAnalysis(true);
-    try {
-      const summary = `
-        Turn ${turn}. Viewpoint: ${role}. Scenario: ${activeScenario.title}. Terrain: ${activeScenario.terrainType}.
-        Units: ${units.map(u => `${u.label} (${u.type}) at [${u.x},${u.y}]`).join(', ')}.
-      `;
-      const result = await receiveStrategicAnalysis({
-        battlefieldSummary: summary,
-        missionObjectives: activeScenario.briefing,
-      });
-      setAnalysis(result);
-    } catch (error) {
-      console.error('Failed to get AI analysis', error);
-    } finally {
-      setLoadingAnalysis(false);
-    }
+  const updateMetricsFromState = (state: BattlefieldState) => {
+    const aliveFriendly = state.units.filter((u) => u.alive && u.faction === 'FRIENDLY').length;
+    const aliveEnemy = state.units.filter((u) => u.alive && u.faction === 'ENEMY').length;
+    const allyUnitsLost = Math.max(0, initialForceCounts.friendly - aliveFriendly);
+    const enemyUnitsDestroyed = Math.max(0, initialForceCounts.enemy - aliveEnemy);
+
+    setCombatMetrics((prev) => ({
+      ...prev,
+      allyUnitsLost,
+      enemyUnitsDestroyed,
+    }));
   };
 
-  useEffect(() => {
-    if (activeScenario && units.length > 0) {
-      fetchStrategicAnalysis();
-    }
-  }, [turn, activeScenario]);
-
-  // ── Handle scenario generated from ScenarioBuilder ───────────────────────────
-  const handleScenarioGenerated = (
+  const initializeScenarioViaBackend = async (
     scenario: GenerateScenarioOutput,
     terrainType: TerrainType,
+    weather: WeatherType
   ) => {
-    const newUnits: Unit[] = scenario.units.map((u, i) => ({
-      id: `sc-${Date.now()}-${i}`,
-      type: (u.allianceRole === 'NEUTRAL' || u.allianceRole === 'INFRASTRUCTURE')
-        ? 'OBJECTIVE'
-        : (u.allianceRole as 'FRIENDLY' | 'ENEMY') ?? 'OBJECTIVE',
-      x: u.x,
-      y: u.y,
-      label: u.label,
-      assetClass: u.assetClass,
-      allianceRole: u.allianceRole,
-    }));
+    const res = await fetch('/api/sitrep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        initialize_scenario: true,
+        scenario: {
+          scenarioTitle: scenario.scenarioTitle,
+          briefing: scenario.briefing,
+          terrainType,
+          weather,
+          units: scenario.units,
+          mapPeaks: scenario.mapPeaks ?? [],
+        },
+      }),
+    });
 
-    setUnits(newUnits);
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.details || data?.error || 'Scenario initialization failed');
+    }
+
+    const state = data.updated_battlefield_state as BattlefieldState;
+    const displayUnits = mapBackendToDisplayUnits(state);
+    const friendly = state.units.filter((u) => u.faction === 'FRIENDLY').length;
+    const enemy = state.units.filter((u) => u.faction === 'ENEMY').length;
+
+    setBattlefieldState(state);
+    setInitialForceCounts({ friendly, enemy });
+    setTurn(state.turn);
+    setUnits(displayUnits);
     setActiveScenario({
       title: scenario.scenarioTitle,
       briefing: scenario.briefing,
       terrainType,
-      units: newUnits,
+      weather,
+      units: displayUnits,
       mapPeaks: scenario.mapPeaks,
     });
-    setTurn(1);
     setAnalysis(null);
+    setMovementEvents([]);
+    setCombatEvents([]);
     setCombatMetrics({
       allyUnitsLost: 0,
       allyInfantryCasualties: 0,
@@ -200,10 +393,30 @@ export default function WarMatrixPage() {
       enemyArmorDestroyed: 0,
       enemySupportNeutralized: 0,
     });
-    toast({
-      title: `Scenario Loaded`,
-      description: `${scenario.scenarioTitle} — ${newUnits.length} units deployed on ${terrainType} terrain.`,
-    });
+  };
+
+  // Strategic analysis is now produced by backend after each authoritative simulation tick.
+
+  // ── Handle scenario generated from ScenarioBuilder ───────────────────────────
+  const handleScenarioGenerated = (
+    scenario: GenerateScenarioOutput,
+    terrainType: TerrainType,
+  ) => {
+    void (async () => {
+      try {
+        await initializeScenarioViaBackend(scenario, terrainType, 'Clear');
+        toast({
+          title: 'Scenario Loaded',
+          description: `${scenario.scenarioTitle} initialized via backend authority.`,
+        });
+      } catch (err: any) {
+        toast({
+          title: 'Scenario Initialization Failed',
+          description: err?.message ?? 'Unable to initialize scenario on backend.',
+          variant: 'destructive',
+        });
+      }
+    })();
   };
 
   // ── Pending operation config from custom builder ─────────────────────────────
@@ -223,13 +436,19 @@ export default function WarMatrixPage() {
     setBuilderScenarioMode('selection');
     const cfg = pendingOperationConfig;
     if (units.length > 0 && !activeScenario) {
-      setActiveScenario({
-        title: cfg?.name || 'Custom Scenario',
+      const draft: GenerateScenarioOutput = {
+        scenarioTitle: cfg?.name || 'Custom Scenario',
         briefing: 'Manually configured battlefield scenario.',
-        terrainType: cfg?.terrain || 'Urban',
-        weather: cfg?.weather || 'Clear',
-        units,
-      });
+        units: units.map((u) => ({
+          label: u.label,
+          assetClass: (u.assetClass as any) || (u.type === 'OBJECTIVE' ? 'Objective' : 'Infantry'),
+          allianceRole: (u.allianceRole as any) || (u.type === 'FRIENDLY' ? 'FRIENDLY' : u.type === 'ENEMY' ? 'ENEMY' : 'NEUTRAL'),
+          x: u.x,
+          y: u.y,
+        })),
+        mapPeaks: [],
+      };
+      void initializeScenarioViaBackend(draft, cfg?.terrain || 'Urban', cfg?.weather || 'Clear');
     } else if (cfg && activeScenario) {
       setActiveScenario(prev => prev ? {
         ...prev,
@@ -245,13 +464,19 @@ export default function WarMatrixPage() {
     setCenterScenarioMode('default');
     const cfg = pendingOperationConfig;
     if (units.length > 0 && !activeScenario) {
-      setActiveScenario({
-        title: cfg?.name || 'Custom Scenario',
+      const draft: GenerateScenarioOutput = {
+        scenarioTitle: cfg?.name || 'Custom Scenario',
         briefing: 'Manually configured battlefield scenario.',
-        terrainType: cfg?.terrain || 'Urban',
-        weather: cfg?.weather || 'Clear',
-        units,
-      });
+        units: units.map((u) => ({
+          label: u.label,
+          assetClass: (u.assetClass as any) || (u.type === 'OBJECTIVE' ? 'Objective' : 'Infantry'),
+          allianceRole: (u.allianceRole as any) || (u.type === 'FRIENDLY' ? 'FRIENDLY' : u.type === 'ENEMY' ? 'ENEMY' : 'NEUTRAL'),
+          x: u.x,
+          y: u.y,
+        })),
+        mapPeaks: [],
+      };
+      void initializeScenarioViaBackend(draft, cfg?.terrain || 'Urban', cfg?.weather || 'Clear');
     }
     setPendingOperationConfig(null);
   };
@@ -268,9 +493,19 @@ export default function WarMatrixPage() {
       return;
     }
 
+    if (!battlefieldState) {
+      toast({
+        title: 'Simulation Not Initialized',
+        description: 'Scenario state is still syncing with backend. Please retry in a moment.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const command = inputValue.trim();
     setInputValue('');
     setStatus('PROCESSING');
+    setLoadingAnalysis(true);
 
     // Add user message to shared chat feed
     const userMsg: ChatMessage = {
@@ -282,122 +517,119 @@ export default function WarMatrixPage() {
     setChatMessages(prev => [...prev, userMsg]);
 
     try {
+      const structuredCommand = buildStructuredCommand(command, battlefieldState);
+
       const res = await fetch('/api/sitrep', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          directive: command,
-          mode: 'GENERAL',
-          battlefield_data: activeScenario
-            ? `Turn ${turn}. Role: ${role}. Scenario: ${activeScenario.title}. Terrain: ${activeScenario.terrainType}. ${units.map(u => `${u.label} (${u.type}) at [${u.x},${u.y}]`).join(', ')}.`
-            : `No scenario active.`,
+          command: structuredCommand,
+          end_simulation: false,
+          current_state: battlefieldState,
+          max_new_tokens: 320,
+          temperature: 0.35,
+          top_p: 0.9,
         }),
       });
 
-      const data = await res.json();
+      const data = (await res.json()) as SimulationResponse;
 
       if (res.ok) {
+        const state = data.updated_battlefield_state;
+        const displayUnits = mapBackendToDisplayUnits(state);
+
+        setBattlefieldState(state);
+        setUnits(displayUnits);
+        setTurn(state.turn);
+        setMovementEvents(data.unit_movements ?? []);
+        setCombatEvents(data.combat_results ?? []);
+        updateMetricsFromState(state);
+
+        setActiveScenario((prev) => prev
+          ? {
+            ...prev,
+            units: displayUnits,
+            briefing: data.ai_narrative_output || prev.briefing,
+            title: `${prev.title.split(' //')[0]} // T${state.turn.toString().padStart(2, '0')}`,
+          }
+          : prev);
+
+        const riskPct = Math.round((data.simulation_results?.expected_risk_operational ?? 0) * 100);
+        const successPct = Math.round((data.simulation_results?.expected_success ?? 0) * 100);
+
+        setAnalysis({
+          strategicOverview: data.ai_narrative_output || `Turn ${state.turn} simulation resolved via backend engine.`,
+          staffAnalysis: {
+            maneuver: `Movement events: ${data.unit_movements?.length ?? 0}. Combat events: ${data.combat_results?.length ?? 0}.`,
+            logistics: `Friendly alive: ${state.units.filter((u) => u.alive && u.faction === 'FRIENDLY').length}, Enemy alive: ${state.units.filter((u) => u.alive && u.faction === 'ENEMY').length}.`,
+            intelligence: `Enemy actions updated from backend simulation.`,
+          },
+          riskAssessment: `Operational risk estimated at ${riskPct}%.`,
+          predictedEnemyBehavior: `Expected next action: ${data.simulation_results?.recommended_next_action ?? 'HOLD'}.`,
+          recommendedActions: [
+            `Follow-up: ${data.simulation_results?.recommended_next_action ?? 'HOLD'}`,
+            'Maintain objective pressure and update command for next turn.',
+          ],
+        });
+
         const aiMsg: ChatMessage = {
           id: `ai-${Date.now()}`,
           source: 'AI_STRATEGIST',
           headline: 'TACTICAL AI RESPONSE',
-          body: data.response ?? '(Empty response from AI server)',
+          body: data.ai_narrative_output ?? '(No narrative returned from backend)',
           timestamp: nowTs(),
           classification: 'CONFIDENTIAL',
         };
         setChatMessages(prev => [...prev, aiMsg]);
 
-        // Update simulation state as well
-        setTurn(prev => prev + 1);
-
-        // Simple combat simulation impact
-        const turnResults = {
-          allyUnitsLost: 0,
-          allyInfantryCasualties: 0,
-          allyArmorDamaged: 0,
-          allySupportLost: 0,
-          enemyUnitsDestroyed: 0,
-          enemyUnitsCaptured: 0,
-          enemyArmorDestroyed: 0,
-          enemySupportNeutralized: 0,
-        };
-
-        setUnits(prev => {
-          let nextUnits = [...prev];
-          // Jitter positions
-          nextUnits = nextUnits.map(u => ({
-            ...u,
-            x: Math.max(1, Math.min(11, u.x + (Math.random() > 0.8 ? 1 : Math.random() < 0.2 ? -1 : 0))),
-            y: Math.max(1, Math.min(7, u.y + (Math.random() > 0.8 ? 1 : Math.random() < 0.2 ? -1 : 0)))
-          }));
-
-          // 15% chance to lose an enemy unit, 10% chance to lose an ally unit
-          if (Math.random() > 0.85) {
-            const enemyUnits = nextUnits.filter(u => u.type === 'ENEMY');
-            if (enemyUnits.length > 0) {
-              const target = enemyUnits[Math.floor(Math.random() * enemyUnits.length)];
-              turnResults.enemyUnitsDestroyed += 1;
-              if (target.assetClass === 'Armor') turnResults.enemyArmorDestroyed += 1;
-              if (target.assetClass === 'Logistics' || target.assetClass === 'Command Unit') turnResults.enemySupportNeutralized += 1;
-              if (Math.random() > 0.8) turnResults.enemyUnitsCaptured += 1;
-              nextUnits = nextUnits.filter(u => u.id !== target.id);
-            }
-          }
-
-          if (Math.random() > 0.90) {
-            const friendlyUnits = nextUnits.filter(u => u.type === 'FRIENDLY');
-            if (friendlyUnits.length > 0) {
-              const target = friendlyUnits[Math.floor(Math.random() * friendlyUnits.length)];
-              turnResults.allyUnitsLost += 1;
-              turnResults.allyInfantryCasualties += Math.floor(Math.random() * 4) + 1;
-              if (target.assetClass === 'Armor') turnResults.allyArmorDamaged += 1;
-              if (target.assetClass === 'Logistics' || target.assetClass === 'Command Unit') turnResults.allySupportLost += 1;
-              nextUnits = nextUnits.filter(u => u.id !== target.id);
-            }
-          }
-
-          return nextUnits;
-        });
-
-        setCombatMetrics(prev => ({
-          allyUnitsLost: prev.allyUnitsLost + turnResults.allyUnitsLost,
-          allyInfantryCasualties: prev.allyInfantryCasualties + turnResults.allyInfantryCasualties,
-          allyArmorDamaged: prev.allyArmorDamaged + turnResults.allyArmorDamaged,
-          allySupportLost: prev.allySupportLost + turnResults.allySupportLost,
-          enemyUnitsDestroyed: prev.enemyUnitsDestroyed + turnResults.enemyUnitsDestroyed,
-          enemyUnitsCaptured: prev.enemyUnitsCaptured + turnResults.enemyUnitsCaptured,
-          enemyArmorDestroyed: prev.enemyArmorDestroyed + turnResults.enemyArmorDestroyed,
-          enemySupportNeutralized: prev.enemySupportNeutralized + turnResults.enemySupportNeutralized,
-        }));
-
         setLastResult({
           command,
-          success: 85,
-          risk: 15,
-          outcome: `AI STRATEGIST: Tactical directive acknowledged. Adjusting positioning.`
+          success: successPct,
+          risk: riskPct,
+          outcome: data.termination_reason || 'Backend simulation tick completed.',
         });
+
+        if (data.terminated) {
+          setStatus('AWAITING COMMAND');
+        }
       } else {
-        throw new Error(data.error || 'AI server failed');
+        const errCode = (data as any).error;
+        const errDetails = (data as any).details || (data as any).error || 'Simulation backend failed';
+
+        if (errCode === 'invalid_action') {
+          const sysMsg: ChatMessage = {
+            id: `sys-${Date.now()}`,
+            source: 'SYSTEM',
+            body: `ACTION VALIDATION FAILED — ${errDetails}`,
+            timestamp: nowTs(),
+          };
+          setChatMessages((prev) => [...prev, sysMsg]);
+          toast({
+            title: 'Invalid Action',
+            description: errDetails,
+            variant: 'destructive',
+          });
+          return;
+        }
+
+        throw new Error(errDetails);
       }
     } catch (err: any) {
       console.error('Command execution failed:', err);
       const sysMsg: ChatMessage = {
         id: `sw-${Date.now()}`,
         source: 'SYSTEM',
-        body: `UPLINK FAILURE — ${err.message || 'Check AI server status.'}`,
+        body: `SIMULATION LINK FAILURE — ${err.message || 'Check backend simulation status.'}`,
         timestamp: nowTs(),
       };
       setChatMessages(prev => [...prev, sysMsg]);
     } finally {
-      setStatus('ACTIVE');
+      setStatus((prev) => (prev === 'AWAITING COMMAND' ? prev : 'ACTIVE'));
+      setLoadingAnalysis(false);
     }
   };
 
-  const visibleUnits = activeScenario ? units.filter(u => {
-    if (role === 'BLUE_TEAM') return u.type === 'FRIENDLY' || u.type === 'OBJECTIVE' || (u.type === 'ENEMY' && Math.random() > 0.1);
-    if (role === 'RED_TEAM') return u.type === 'ENEMY' || u.type === 'OBJECTIVE' || (u.type === 'FRIENDLY' && Math.random() > 0.1);
-    return true;
-  }) : [];
+  const visibleUnits = activeScenario ? units : [];
 
   const terrainType = activeScenario?.terrainType ?? 'Highland';
 
@@ -673,6 +905,8 @@ export default function WarMatrixPage() {
                 weather={activeScenario.weather}
                 scenarioTitle={activeScenario.title}
                 mapPeaks={activeScenario.mapPeaks}
+                movements={movementEvents}
+                combatEvents={combatEvents}
               />
             ) : centerScenarioMode !== 'default' ? (
               <ScenarioBuilder

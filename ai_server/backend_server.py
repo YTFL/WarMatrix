@@ -310,7 +310,11 @@ class BackendHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+            # Client disconnected before response finished writing (common on timeout/cancel).
+            log(f"Client disconnected during response write: {exc}")
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)

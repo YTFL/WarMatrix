@@ -4,7 +4,7 @@ const AI_SERVER_BASE = process.env.AI_SERVER_BASE_URL ?? 'http://127.0.0.1:8000'
 const SIM_SERVER_BASE = process.env.SIM_SERVER_BASE_URL ?? 'http://127.0.0.1:8001';
 const INFERENCE_TIMEOUT_MS = 300_000; // 5 min — CPU inference can be slow
 const HEALTH_TIMEOUT_MS = 5_000;     // 5 s  — quick ping only
-const SIM_TIMEOUT_MS = 60_000;
+const SIM_TIMEOUT_MS = 120_000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,7 +145,7 @@ export async function POST(req: Request) {
             command: raw.command ?? raw.directive ?? 'hold position',
             current_state: raw.current_state,
             end_simulation: raw.end_simulation ?? false,
-            max_new_tokens: clamp(raw.max_new_tokens, 32, 512, 180),
+            max_new_tokens: clamp(raw.max_new_tokens, 32, 512, 320),
             temperature: clamp(raw.temperature, 0.0, 2.0, 0.45),
             top_p: clamp(raw.top_p, 0.1, 1.0, 0.9),
         };

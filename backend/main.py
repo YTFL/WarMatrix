@@ -12,6 +12,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from api.routes import router
@@ -27,6 +28,7 @@ app.include_router(router, prefix="/api")
 GRID_WIDTH = 12
 GRID_HEIGHT = 8
 AI_SERVER_URL = "http://127.0.0.1:8000/api/sitrep"
+AI_NARRATIVE_TIMEOUT_SEC = 120
 
 TERRAIN_RULES: Dict[str, Dict[str, float]] = {
     "plains": {"move_cost": 1.0, "block_los": 0.0, "defense": 0.0},
@@ -546,6 +548,102 @@ class TickArtifacts:
     simulation_results: Dict[str, Any]
 
 
+def _validate_command(state: BattlefieldState, command: StructuredCommand) -> Dict[str, Any]:
+    reasons: List[str] = []
+
+    friendly_alive = [u for u in state.units if u.alive and u.faction == "FRIENDLY"]
+    if not friendly_alive:
+        reasons.append("No alive friendly units available to execute an action.")
+
+    actor = _find_unit(state, command.unit_id, "FRIENDLY")
+    if command.unit_id and not actor:
+        reasons.append(f"Unit '{command.unit_id}' is not an alive friendly unit.")
+    if not actor and friendly_alive:
+        actor = friendly_alive[0]
+
+    resolved_target: Dict[str, Any] = {}
+    if command.target:
+        resolved_target = command.target.dict(exclude_none=True)
+
+    target_xy: Optional[Tuple[int, int]] = None
+    if command.target and command.target.objective_id:
+        obj = next((o for o in state.objectives if o.id == command.target.objective_id), None)
+        if not obj:
+            reasons.append(f"Objective '{command.target.objective_id}' does not exist.")
+        else:
+            target_xy = (obj.x, obj.y)
+            resolved_target["x"] = obj.x
+            resolved_target["y"] = obj.y
+
+    if command.target and command.target.x is not None and command.target.y is not None:
+        tx = int(command.target.x)
+        ty = int(command.target.y)
+        if not (1 <= tx <= state.width and 1 <= ty <= state.height):
+            reasons.append(f"Target coordinates ({tx}, {ty}) are outside the battlefield bounds.")
+        else:
+            target_xy = (tx, ty)
+            resolved_target["x"] = tx
+            resolved_target["y"] = ty
+
+    cells = _cell_lookup(state)
+    occupied = _occupied_positions(state, exclude_unit_id=actor.id if actor else None)
+
+    if actor:
+        normalized_unit_id = actor.id
+    else:
+        normalized_unit_id = command.unit_id
+
+    if command.action_type in {"MOVE", "CAPTURE", "RECON", "DEFEND"}:
+        if not actor:
+            reasons.append("No valid friendly actor is available for a maneuver action.")
+        if command.action_type in {"MOVE", "CAPTURE", "RECON"} and not target_xy:
+            reasons.append("Maneuver actions require a target coordinate or objective.")
+        if target_xy:
+            target_cell = cells.get(target_xy)
+            if target_cell and target_cell.terrain == "water":
+                reasons.append("Target cell is water and cannot be occupied.")
+            blocker = occupied.get(target_xy)
+            if blocker and blocker.faction == "FRIENDLY":
+                reasons.append(f"Target cell is occupied by friendly unit '{blocker.id}'.")
+
+    if command.action_type == "ATTACK":
+        if not actor:
+            reasons.append("Attack action requires an alive friendly actor.")
+        defender: Optional[BattlefieldUnit] = None
+        if command.target and command.target.unit_id:
+            defender = next((u for u in state.units if u.id == command.target.unit_id and u.faction == "ENEMY" and u.alive), None)
+            if not defender:
+                reasons.append(f"Target enemy unit '{command.target.unit_id}' is not available.")
+        elif actor:
+            defender = _closest_enemy(state, actor)
+
+        if actor and defender:
+            dist = _distance((actor.x, actor.y), (defender.x, defender.y))
+            if dist > actor.range:
+                reasons.append(f"Target '{defender.id}' is out of range (distance {dist:.1f}, range {actor.range}).")
+            if not _has_line_of_sight(state, actor, defender):
+                reasons.append(f"No line-of-sight from '{actor.id}' to '{defender.id}'.")
+
+            resolved_target["unit_id"] = defender.id
+            if "x" not in resolved_target:
+                resolved_target["x"] = defender.x
+                resolved_target["y"] = defender.y
+        elif actor:
+            reasons.append("No valid enemy target found for attack action.")
+
+    is_valid = len(reasons) == 0
+    return {
+        "is_valid": is_valid,
+        "reasons": reasons,
+        "normalized_command": {
+            "action_type": command.action_type,
+            "unit_id": normalized_unit_id,
+            "target": resolved_target,
+            "raw_input": command.raw_input,
+        },
+    }
+
+
 def _combat(state: BattlefieldState, attacker: BattlefieldUnit, defender: BattlefieldUnit, rng: random.Random) -> Optional[Dict[str, Any]]:
     if not attacker.alive or not defender.alive:
         return None
@@ -672,32 +770,133 @@ def _macro_state_from_battlefield(state: BattlefieldState) -> GameState:
     )
 
 
-def _generate_narrative(player_command: StructuredCommand, updated_state: BattlefieldState, artifacts: TickArtifacts) -> str:
+def _generate_narrative(
+    player_command: StructuredCommand,
+    updated_state: BattlefieldState,
+    artifacts: TickArtifacts,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+) -> str:
+    movement_events = [
+        {
+            "unit_id": m.get("unit_id"),
+            "from": m.get("from"),
+            "to": m.get("to"),
+            "enemy_action": bool(m.get("enemy_action", False)),
+        }
+        for m in artifacts.movements
+    ]
+    combat_events = [
+        {
+            "attacker_id": c.get("attacker_id"),
+            "defender_id": c.get("defender_id"),
+            "outcome": c.get("outcome"),
+            "damage": c.get("damage", 0),
+            "enemy_action": bool(c.get("enemy_action", False)),
+        }
+        for c in artifacts.combat_results
+    ]
+    objective_changes = [o for o in artifacts.objective_status if o.get("changed")]
+
     payload = {
-        "instruction": "Produce a concise battlefield turn narrative. Focus only on events that happened this tick.",
+        "instruction": (
+            "You are a military operations narrator. Produce TWO SECTIONS for one simulation turn. "
+            "Section 1 title exactly: STRUCTURED ANALYSIS. Section 2 title exactly: WAR STORY. "
+            "Use only supplied events, no invented units, and end with complete sentences."
+        ),
         "battlefield_data": json.dumps(
             {
+                "format": {
+                    "sections": [
+                        "STRUCTURED ANALYSIS",
+                        "WAR STORY",
+                    ],
+                    "constraints": [
+                        "Between 180 and 280 words total.",
+                        "In STRUCTURED ANALYSIS use 4 bullets: Turn Outcome, Objective Control, Risk, Next Action.",
+                        "In WAR STORY write a concise chronological narrative of this turn.",
+                        "No markdown tables.",
+                        "Reference unit IDs and objectives when possible.",
+                    ],
+                },
+                "turn": updated_state.turn,
                 "player_command": player_command.dict(),
-                "updated_battlefield_state": updated_state.dict(),
+                "turn_summary": {
+                    "movements": movement_events,
+                    "combat": combat_events,
+                    "objective_changes": objective_changes,
+                    "casualties": artifacts.casualties,
+                    "enemy_actions": artifacts.enemy_actions,
+                },
                 "simulation_results": artifacts.simulation_results,
-                "enemy_actions": artifacts.enemy_actions,
-                "terrain_context": [
-                    {"x": c.x, "y": c.y, "terrain": c.terrain, "elevation": c.elevation}
-                    for c in updated_state.terrain_grid
-                ],
+                "state_snapshot": {
+                    "friendly_alive": [u.id for u in updated_state.units if u.alive and u.faction == "FRIENDLY"],
+                    "enemy_alive": [u.id for u in updated_state.units if u.alive and u.faction == "ENEMY"],
+                    "objectives": [
+                        {
+                            "id": o.id,
+                            "controller": o.controller,
+                            "progress_friendly": o.progress_friendly,
+                            "progress_enemy": o.progress_enemy,
+                        }
+                        for o in updated_state.objectives
+                    ],
+                },
             }
         ),
-        "max_new_tokens": 180,
-        "temperature": 0.35,
-        "top_p": 0.9,
+        "max_new_tokens": max(96, min(512, int(max_new_tokens))),
+        "temperature": max(0.0, min(2.0, float(temperature))),
+        "top_p": max(0.1, min(1.0, float(top_p))),
         "do_sample": False,
     }
     body = json.dumps(payload).encode("utf-8")
     req = Request(AI_SERVER_URL, data=body, method="POST", headers={"Content-Type": "application/json"})
     try:
-        with urlopen(req, timeout=45) as resp:
+        with urlopen(req, timeout=AI_NARRATIVE_TIMEOUT_SEC) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return str(data.get("response") or "No narrative generated.")
+            text = str(data.get("response") or "").strip()
+            if not text:
+                return "Narrative unavailable: AI returned empty output for this turn."
+
+            # If the model output looks clipped, synthesize a deterministic continuation.
+            clipped = len(text) < 80 or text[-1] not in ".!?"
+            if clipped:
+                sim = artifacts.simulation_results
+                moved = len(artifacts.movements)
+                combats = len(artifacts.combat_results)
+                obj_changes = [o for o in artifacts.objective_status if o.get("changed")]
+                outcome_line = (
+                    f"Turn {updated_state.turn} resolved with {moved} movements, {combats} combat events, "
+                    f"and expected success {int(float(sim.get('expected_success', 0.0)) * 100)}%."
+                )
+                obj_shift_parts = [f"{o.get('objective_id')}->{o.get('controller')}" for o in obj_changes]
+                obj_line = (
+                    f"Objective control shifts: {', '.join(obj_shift_parts)}"
+                    if obj_changes
+                    else "Objective control remained contested with no controller change this turn."
+                )
+                risk_line = (
+                    f"Operational risk is {int(float(sim.get('expected_risk_operational', 0.0)) * 100)}%, "
+                    f"with uncertainty {int(float(sim.get('uncertainty', 0.0)) * 100)}%."
+                )
+                next_line = f"Recommended next action: {sim.get('recommended_next_action', 'HOLD')}."
+                story = (
+                    "Friendly elements executed the commander directive and forced a tactical response from enemy units. "
+                    "Contact was exchanged around active approach lanes, with both sides adapting positions to terrain and objective pressure. "
+                    "The line remains dynamic as follow-on maneuvers are prepared for the next turn."
+                )
+                return (
+                    "STRUCTURED ANALYSIS\n"
+                    f"- Turn Outcome: {outcome_line}\n"
+                    f"- Objective Control: {obj_line}\n"
+                    f"- Risk: {risk_line}\n"
+                    f"- Next Action: {next_line}\n\n"
+                    "WAR STORY\n"
+                    f"{story}"
+                )
+
+            return text
     except URLError:
         return "Narrative unavailable: AI server not reachable during this turn."
     except Exception:
@@ -858,6 +1057,26 @@ def simulate_tick(payload: SimulationTickRequest) -> Dict[str, Any]:
         }
 
     command = _normalize_command(payload.command, state)
+    validation = _validate_command(state, command)
+    if not validation["is_valid"]:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_action",
+                "details": "; ".join(validation["reasons"]),
+                "validation": validation,
+                "updated_battlefield_state": state.dict(),
+                "terminated": state.ended,
+            },
+        )
+
+    normalized_cmd = validation["normalized_command"]
+    command = StructuredCommand(
+        action_type=normalized_cmd["action_type"],
+        unit_id=normalized_cmd.get("unit_id"),
+        target=StructuredTarget(**normalized_cmd.get("target", {})),
+        raw_input=normalized_cmd.get("raw_input", command.raw_input),
+    )
     rng = _seeded_random_for_state(state.turn)
 
     artifacts = _simulate_player_phase(state, command, rng)
@@ -872,7 +1091,15 @@ def simulate_tick(payload: SimulationTickRequest) -> Dict[str, Any]:
         state.turn += 1
 
     with ThreadPoolExecutor(max_workers=1) as exe:
-        fut = exe.submit(_generate_narrative, command, state, artifacts)
+        fut = exe.submit(
+            _generate_narrative,
+            command,
+            state,
+            artifacts,
+            payload.max_new_tokens,
+            payload.temperature,
+            payload.top_p,
+        )
         narrative = fut.result()
 
     return {
@@ -884,6 +1111,7 @@ def simulate_tick(payload: SimulationTickRequest) -> Dict[str, Any]:
         "casualties": artifacts.casualties,
         "simulation_results": artifacts.simulation_results,
         "normalized_command": command.dict(),
+        "validation": validation,
         "ai_narrative_output": narrative,
         "terminated": state.ended,
         "termination_reason": state.end_reason,

@@ -15,6 +15,19 @@ interface ScenarioUnit {
     allianceRole?: string;
 }
 
+interface UnitMovement {
+    unit_id: string;
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+}
+
+interface CombatEvent {
+    attacker_id: string;
+    defender_id: string;
+    outcome: string;
+    damage: number;
+}
+
 type WeatherType = 'Clear' | 'Partly Cloudy' | 'Storm' | 'Fog' | 'Heavy Rain' | 'Sandstorm';
 
 interface TacticalMapDisplayProps {
@@ -23,6 +36,8 @@ interface TacticalMapDisplayProps {
     weather?: WeatherType;
     scenarioTitle?: string;
     mapPeaks?: { cx: number; cy: number; h: number; r2: number }[];
+    movements?: UnitMovement[];
+    combatEvents?: CombatEvent[];
 }
 
 // ─── Terrain palettes ─────────────────────────────────────────────────────────
@@ -189,6 +204,8 @@ export function TacticalMapDisplay({
     weather,
     scenarioTitle,
     mapPeaks,
+    movements = [],
+    combatEvents = [],
 }: TacticalMapDisplayProps) {
     const tc: TC = TERRAIN_CONFIG[terrainType as TerrainKey] ?? TERRAIN_CONFIG.Highland;
 
@@ -407,6 +424,46 @@ export function TacticalMapDisplay({
         };
     });
 
+    const toDisplayX = (x: number) => {
+        const raw = x <= 12 ? Math.round((x / 12) * COLS) : x;
+        return Math.max(1, Math.min(COLS, raw));
+    };
+    const toDisplayY = (y: number) => {
+        const raw = y <= 8 ? Math.round((y / 8) * ROWS) : y;
+        return Math.max(1, Math.min(ROWS, raw));
+    };
+
+    const movementVectors = useMemo(() => {
+        return movements.map((mv) => {
+            const fx = toDisplayX(mv.from.x);
+            const fy = toDisplayY(mv.from.y);
+            const tx = toDisplayX(mv.to.x);
+            const ty = toDisplayY(mv.to.y);
+            return {
+                unit_id: mv.unit_id,
+                x1: PL + ((fx - 0.5) / COLS) * mapW,
+                y1: PT + ((fy - 0.5) / ROWS) * mapH,
+                x2: PL + ((tx - 0.5) / COLS) * mapW,
+                y2: PT + ((ty - 0.5) / ROWS) * mapH,
+            };
+        });
+    }, [movements, PL, PT, COLS, ROWS, mapW, mapH]);
+
+    const combatFlashPoints = useMemo(() => {
+        return combatEvents
+            .map((ev) => {
+                const target = unitCoords.find((u) => u.id === ev.defender_id) || unitCoords.find((u) => u.id === ev.attacker_id);
+                if (!target) return null;
+                return {
+                    key: `${ev.attacker_id}-${ev.defender_id}-${ev.damage}-${ev.outcome}`,
+                    x: target.px,
+                    y: target.py,
+                    damage: ev.damage,
+                };
+            })
+            .filter(Boolean) as Array<{ key: string; x: number; y: number; damage: number }>;
+    }, [combatEvents, unitCoords]);
+
     const colAxis = Array.from({ length: COLS }, (_, i) => i + 1);
     const rowAxis = Array.from({ length: ROWS }, (_, i) => String(i + 1).padStart(2, '0'));
 
@@ -435,6 +492,19 @@ export function TacticalMapDisplay({
 
     return (
         <div className="relative w-full h-full overflow-hidden" style={{ background: tc.bg }}>
+            <style>{`
+                @keyframes wmDashFlow {
+                    to { stroke-dashoffset: -18; }
+                }
+                @keyframes wmCombatPulse {
+                    0% { transform: scale(0.45); opacity: 0.95; }
+                    100% { transform: scale(1.6); opacity: 0; }
+                }
+                @keyframes wmDamageFloat {
+                    0% { transform: translate(-50%, 0); opacity: 1; }
+                    100% { transform: translate(-50%, -14px); opacity: 0; }
+                }
+            `}</style>
 
             {/* ── HUD Panels ── */}
             <div className="absolute top-3 left-3 z-30 pointer-events-none flex flex-col gap-2">
@@ -734,6 +804,7 @@ export function TacticalMapDisplay({
                         const isMoving = ['Infantry', 'Mechanized', 'Armor', 'Recon'].includes(unit.assetClass || '');
                         const isBase = ['Infrastructure', 'Command Unit', 'Logistics'].includes(unit.assetClass || '');
                         const isObj = unit.assetClass === 'Objective' || unit.type === 'OBJECTIVE';
+                        const isUnknownCombat = !isObj && !isBase && !isMoving;
 
                         return (
                             <g
@@ -780,11 +851,68 @@ export function TacticalMapDisplay({
                                     </>
                                 )}
 
+                                {isUnknownCombat && (
+                                    <rect
+                                        x={unit.px - 3.5}
+                                        y={unit.py - 3.5}
+                                        width="7"
+                                        height="7"
+                                        fill={col}
+                                        opacity="0.95"
+                                        transform={`rotate(45 ${unit.px} ${unit.py})`}
+                                    />
+                                )}
+
                             </g>
                         );
                     })}
+
+                    {/* ── Movement vectors from latest simulation tick ── */}
+                    {movementVectors.map((mv, i) => (
+                        <g key={`${mv.unit_id}-${i}`} opacity="0.85" pointerEvents="none">
+                            <line
+                                x1={mv.x1}
+                                y1={mv.y1}
+                                x2={mv.x2}
+                                y2={mv.y2}
+                                stroke={mv.unit_id.startsWith('e') ? '#EF4444' : '#3B82F6'}
+                                strokeWidth="1.3"
+                                strokeDasharray="5 4"
+                                style={{ animation: 'wmDashFlow 1.1s linear infinite' }}
+                            />
+                            <circle cx={mv.x2} cy={mv.y2} r="1.9" fill={mv.unit_id.startsWith('e') ? '#EF4444' : '#3B82F6'} />
+                        </g>
+                    ))}
                 </g>
             </svg>
+
+            {/* Combat flash overlays */}
+            {combatFlashPoints.map((pt) => (
+                <div
+                    key={pt.key}
+                    className="absolute pointer-events-none"
+                    style={{
+                        left: `${(pt.x / VW) * 100}%`,
+                        top: `${(pt.y / VH) * 100}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 35,
+                    }}
+                >
+                    <div
+                        className="w-8 h-8 rounded-full"
+                        style={{
+                            background: 'radial-gradient(circle, rgba(239,68,68,0.85) 0%, rgba(239,68,68,0.16) 55%, rgba(239,68,68,0) 100%)',
+                            animation: 'wmCombatPulse 850ms ease-out',
+                        }}
+                    />
+                    <div
+                        className="absolute left-1/2 -top-3 text-[9px] font-bold text-[#FCA5A5] font-mono"
+                        style={{ animation: 'wmDamageFloat 900ms ease-out' }}
+                    >
+                        -{pt.damage}
+                    </div>
+                </div>
+            ))}
 
             {/* ── Bottom bar ── */}
             <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">

@@ -79,9 +79,30 @@ interface SimulationResponse {
     recommended_next_action?: string;
   };
   normalized_command: { action_type: string };
+  validation?: {
+    is_valid: boolean;
+    reasons: string[];
+  };
   ai_narrative_output: string;
   terminated: boolean;
   termination_reason?: string;
+}
+
+function normalizeToSimGrid(unit: Unit): Unit {
+  const scaleX = (x: number) => {
+    if (x <= 12) return Math.max(1, Math.min(12, x));
+    return Math.max(1, Math.min(12, Math.round((x / 44) * 12)));
+  };
+  const scaleY = (y: number) => {
+    if (y <= 8) return Math.max(1, Math.min(8, y));
+    return Math.max(1, Math.min(8, Math.round((y / 28) * 8)));
+  };
+
+  return {
+    ...unit,
+    x: scaleX(Number.isFinite(unit.x) ? unit.x : 1),
+    y: scaleY(Number.isFinite(unit.y) ? unit.y : 1),
+  };
 }
 
 function buildDefaultStateFromUnits(units: Unit[]): BattlefieldState {
@@ -141,16 +162,16 @@ function mapStateToUnits(state: BattlefieldState): Unit[] {
     .map((u) => ({
       id: u.id,
       type: u.faction,
-      x: u.x,
-      y: u.y,
+      x: Math.max(1, Math.min(12, u.x)),
+      y: Math.max(1, Math.min(8, u.y)),
       label: `${u.label} [${u.hp}]`,
     }));
 
   const objectiveMarkers: Unit[] = state.objectives.map((o) => ({
     id: o.id,
     type: 'OBJECTIVE',
-    x: o.x,
-    y: o.y,
+    x: Math.max(1, Math.min(12, o.x)),
+    y: Math.max(1, Math.min(8, o.y)),
     label: `${o.label} (${o.controller})`,
   }));
 
@@ -187,7 +208,6 @@ export default function WarMatrixPage() {
 
   const [movementEvents, setMovementEvents] = useState<SimulationResponse['unit_movements']>([]);
   const [combatEvents, setCombatEvents] = useState<SimulationResponse['combat_results']>([]);
-  const [lastCasualties, setLastCasualties] = useState<SimulationResponse['casualties']>([]);
   const [terrainSummary, setTerrainSummary] = useState<{ dominant: string; avgElevation: number }>({ dominant: 'plains', avgElevation: 0 });
 
   useEffect(() => {
@@ -196,6 +216,31 @@ export default function WarMatrixPage() {
 
   const friendlyUnits = useMemo(
     () => (battlefieldState?.units ?? []).filter((u) => u.alive && u.faction === 'FRIENDLY'),
+    [battlefieldState]
+  );
+
+  const enemyUnits = useMemo(
+    () => (battlefieldState?.units ?? []).filter((u) => u.alive && u.faction === 'ENEMY'),
+    [battlefieldState]
+  );
+
+  const friendlyCasualties = useMemo(
+    () => (battlefieldState?.units ?? []).filter((u) => !u.alive && u.faction === 'FRIENDLY').length,
+    [battlefieldState]
+  );
+
+  const enemyCasualties = useMemo(
+    () => (battlefieldState?.units ?? []).filter((u) => !u.alive && u.faction === 'ENEMY').length,
+    [battlefieldState]
+  );
+
+  const friendlyObjectives = useMemo(
+    () => (battlefieldState?.objectives ?? []).filter((o) => o.controller === 'FRIENDLY').length,
+    [battlefieldState]
+  );
+
+  const enemyObjectives = useMemo(
+    () => (battlefieldState?.objectives ?? []).filter((o) => o.controller === 'ENEMY').length,
     [battlefieldState]
   );
 
@@ -250,7 +295,6 @@ export default function WarMatrixPage() {
       setMapUnits(mapStateToUnits(state));
       setMovementEvents([]);
       setCombatEvents([]);
-      setLastCasualties([]);
       setLastResult(null);
 
       const initMsg: ChatMessage = {
@@ -281,7 +325,6 @@ export default function WarMatrixPage() {
 
     setMovementEvents(data.unit_movements ?? []);
     setCombatEvents(data.combat_results ?? []);
-    setLastCasualties(data.casualties ?? []);
 
     setLastResult({
       command: commandText,
@@ -327,6 +370,9 @@ export default function WarMatrixPage() {
           command,
           end_simulation: endSimulation,
           current_state: battlefieldState ?? buildDefaultStateFromUnits(mapUnits),
+          max_new_tokens: 320,
+          temperature: 0.35,
+          top_p: 0.9,
         }),
       });
 
@@ -337,10 +383,13 @@ export default function WarMatrixPage() {
 
       applySimulationResponse(command, data);
     } catch (err: any) {
+      const backendValidation = err?.message?.includes('invalid_action') ? 'Action validation failed in simulation backend.' : null;
       const sysMsg: ChatMessage = {
         id: `sys-${Date.now()}`,
         source: 'SYSTEM',
-        body: `SIMULATION LINK FAILURE — ${err?.message ?? 'Unknown error.'}`,
+        body: backendValidation
+          ? `${backendValidation} ${err?.message ?? ''}`.trim()
+          : `SIMULATION LINK FAILURE — ${err?.message ?? 'Unknown error.'}`,
         timestamp: nowTs(),
       };
       setChatMessages((prev) => [...prev, sysMsg]);
@@ -362,12 +411,12 @@ export default function WarMatrixPage() {
   };
 
   const handleScenarioUnitsUpdate = (units: Unit[]) => {
-    setMapUnits(units);
-    setBattlefieldState(buildDefaultStateFromUnits(units));
+    const normalized = units.map(normalizeToSimGrid);
+    setMapUnits(normalized);
+    setBattlefieldState(buildDefaultStateFromUnits(normalized));
     setTurn(1);
     setMovementEvents([]);
     setCombatEvents([]);
-    setLastCasualties([]);
   };
 
   return (
@@ -398,8 +447,12 @@ export default function WarMatrixPage() {
 
           <TacticalWidget title="Battlefield Data" icon={Radio}>
             <div className="flex flex-col gap-2 text-[9px] font-mono text-[#9CA3AF]">
+              <div>Turn: <span className="text-[#3A8DFF]">{battlefieldState?.turn ?? turn}</span></div>
               <div>Friendly Alive: <span className="text-[#22C55E]">{friendlyUnits.length}</span></div>
-              <div>Casualties: <span className="text-[#EF4444]">{lastCasualties.length}</span></div>
+              <div>Enemy Alive: <span className="text-[#EF4444]">{enemyUnits.length}</span></div>
+              <div>Friendly KIA: <span className="text-[#F59E0B]">{friendlyCasualties}</span></div>
+              <div>Enemy KIA: <span className="text-[#EF4444]">{enemyCasualties}</span></div>
+              <div>Obj Control (F/E): <span className="text-[#E6EDF3]">{friendlyObjectives}/{enemyObjectives}</span></div>
               <div className="pt-1 border-t border-[#1F6FEB]/20">Objectives</div>
               {objectiveStatus.map((o) => (
                 <div key={o.id} className="flex items-center justify-between">
@@ -498,7 +551,7 @@ export default function WarMatrixPage() {
                         <span className="text-[7px] font-bold text-[#3A8DFF] uppercase tracking-wider">{msg.source}</span>
                         <span className="text-[6px] font-mono text-[#4B5563]">{msg.timestamp}</span>
                       </div>
-                      <p className="text-[10px] font-mono text-[#9CA3AF] line-clamp-2">{msg.body}</p>
+                      <p className="text-[10px] font-mono text-[#9CA3AF] whitespace-pre-wrap break-words">{msg.body}</p>
                     </div>
                   ))}
                 </div>

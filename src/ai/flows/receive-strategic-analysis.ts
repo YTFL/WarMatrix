@@ -49,6 +49,161 @@ export async function receiveStrategicAnalysis(
   input: ReceiveStrategicAnalysisInput
 ): Promise<ReceiveStrategicAnalysisOutput> {
 
+  const buildFallbackFromText = (rawText: string): ReceiveStrategicAnalysisOutput => {
+    const clean = rawText.replace(/\s+/g, ' ').trim();
+    const lines = rawText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const sentences = clean
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const pickSentence = (re: RegExp, fallback: string): string => {
+      const fromSentence = sentences.find((s) => re.test(s));
+      if (fromSentence) return fromSentence;
+      const fromLine = lines.find((l) => re.test(l));
+      return fromLine || fallback;
+    };
+
+    const directiveMatch = rawText.match(/commander\s+directive\s*[:\-]\s*(.+)/i);
+    const directive = directiveMatch?.[1]?.trim();
+
+    const extractedActions = (directive || clean)
+      .split(/\.|,| and /i)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 8)
+      .slice(0, 2);
+
+    const recommendedActions = extractedActions.length >= 2
+      ? extractedActions
+      : [
+          directive ? `Execute directive: ${directive}.` : 'Reposition friendly maneuver elements to preserve initiative.',
+          'Maintain ISR focus on enemy armor and protect objective approach lanes.',
+        ];
+
+    const mapped = {
+      strategicOverview:
+        sentences[0] ||
+        'Battlefield remains contested with active maneuver by both friendly and enemy formations.',
+      staffAnalysis: {
+        maneuver: pickSentence(
+          /move|advance|maneuver|reposition|flank|sector|grid|perform/i,
+          'Friendly forces are maneuvering to improve positional advantage near active objectives.'
+        ),
+        logistics: pickSentence(
+          /logistics|supply|ammo|fuel|support|corridor|line/i,
+          'Logistics posture remains viable but requires route security and sustained support coverage.'
+        ),
+        intelligence: pickSentence(
+          /intel|enemy|hostile|recon|signal|intercept|threat/i,
+          'Enemy intent indicates continued pressure against key lanes with opportunistic counter-maneuver.'
+        ),
+      },
+      riskAssessment: pickSentence(
+        /risk|threat|casual|loss|danger|exposed|vulnerable/i,
+        'Operational risk is moderate due to contested terrain and incomplete certainty on enemy response timing.'
+      ),
+      predictedEnemyBehavior: pickSentence(
+        /enemy|hostile|counter|reinforce|retreat|advance|attack/i,
+        'Enemy likely repositions to defend objective routes while probing for a flank opportunity next turn.'
+      ),
+      recommendedActions,
+    };
+
+    return ReceiveStrategicAnalysisOutputSchema.parse(mapped);
+  };
+
+  const collectJsonCandidates = (raw: string): string[] => {
+    const candidates: string[] = [];
+    let depth = 0;
+    let start = -1;
+    let inString = false;
+    let isEscape = false;
+
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (isEscape) {
+        isEscape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        isEscape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+
+      if (ch === '{') {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (ch === '}') {
+        if (depth > 0) depth--;
+        if (depth === 0 && start >= 0) {
+          candidates.push(raw.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      const fallback = raw.match(/\{[\s\S]*\}/);
+      if (fallback?.[0]) candidates.push(fallback[0]);
+    }
+    return candidates;
+  };
+
+  const repairJson = (inputJson: string): string => {
+    let fixed = inputJson.trim();
+
+    // Strip accidental markdown fences.
+    fixed = fixed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    // Handle missing commas between key-value pairs and between object/array end and next key.
+    fixed = fixed.replace(/"\s+("[\w_]+"\s*:)/g, '", $1');
+    fixed = fixed.replace(/([}\]0-9"])(\s*)("[\w_]+"\s*:)/g, '$1, $3');
+
+    // Handle missing commas between adjacent objects in arrays.
+    fixed = fixed.replace(/}\s*{/g, '}, {');
+
+    // Fix unquoted keys.
+    fixed = fixed.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+
+    // Remove trailing commas.
+    fixed = fixed.replace(/,\s*([}\]])/g, '$1');
+
+    // Balance braces/brackets if truncated.
+    let openBraces = (fixed.match(/\{/g) || []).length - (fixed.match(/}/g) || []).length;
+    while (openBraces > 0) {
+      fixed += '}';
+      openBraces--;
+    }
+
+    let openBrackets = (fixed.match(/\[/g) || []).length - (fixed.match(/]/g) || []).length;
+    while (openBrackets > 0) {
+      fixed += ']';
+      openBrackets--;
+    }
+
+    return fixed;
+  };
+
+  const tryParseCandidate = (candidate: string): any | null => {
+    const attempts = [candidate, repairJson(candidate)];
+    for (const attempt of attempts) {
+      try {
+        return JSON.parse(attempt);
+      } catch {
+        // Keep trying other variants.
+      }
+    }
+    return null;
+  };
+
   const instruction = `OUTPUT STRICTLY VALID JSON ONLY. NO EXPLANATIONS. NO MARKDOWN.
 Generate a compressed Staff Strategic Assessment as a JSON dictionary using EXACT abbreviations for keys to save tokens.
 
@@ -94,89 +249,23 @@ GENERATE RAW JSON DICTIONARY ONLY:`;
   // Clean up code block ticks if any slipped through
   text = text.replace(/^```(json)?/, '').replace(/```$/, '').trim();
 
-  let jsonString = '';
-  const startIndex = text.indexOf('{');
-  if (startIndex === -1) {
-    throw new Error("Failed to find valid JSON dictionary in local model output. Output: " + text.slice(0, 50));
+  const candidates = collectJsonCandidates(text);
+  if (candidates.length === 0) {
+    console.warn('No JSON candidate found in model output. Falling back to text mapper.');
+    return buildFallbackFromText(text);
   }
-
-  let braceCount = 0;
-  let endIndex = startIndex;
-  let inStrCounter = false;
-  let isEscape = false;
-
-  for (let i = startIndex; i < text.length; i++) {
-    const char = text[i];
-    if (isEscape) {
-      isEscape = false;
-      continue;
-    }
-    if (char === '\\') {
-      isEscape = true;
-      continue;
-    }
-    if (char === '"') {
-      inStrCounter = !inStrCounter;
-      continue;
-    }
-    if (!inStrCounter) {
-      if (char === '{') braceCount++;
-      else if (char === '}') {
-        braceCount--;
-        if (braceCount === 0) {
-          endIndex = i;
-          break;
-        }
-      }
-    }
-  }
-
-  if (braceCount === 0) {
-    jsonString = text.substring(startIndex, endIndex + 1);
-  } else {
-    // Fallback to greedy regex if brace counting fails due to malformed string
-    const match = text.match(/\{[\s\S]*\}/);
-    jsonString = match ? match[0] : '';
-  }
-
-  if (!jsonString) {
-    throw new Error("Failed to extract JSON from local model output.");
-  }
-
-  // ── JSON Repair Heuristics ──────────────────────────────────────────────────
-
-  // 1. Handle missing commas between key-value pairs: "val" "key": -> "val", "key":
-  jsonString = jsonString.replace(/"\s+("[\w_]+"\s*:)/g, '", $1');
-
-  // 2. Handle missing commas between objects in arrays: } { -> }, {
-  jsonString = jsonString.replace(/\}\s*\{/g, '}, {');
-
-  // 3. Fix unquoted keys: {key: -> {"key":
-  jsonString = jsonString.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
-
-  // 4. Fix unescaped quotes and literal newlines in values
-  const keysToFix = ["so", "ra", "peb", "m", "l", "i", "r"];
-  for (const key of keysToFix) {
-    // This regex looks for the key, then the value, stopping at the next probable key or end of object
-    const regex = new RegExp(`("${key}"\\s*:\\s*")([\\s\\S]*?)(?="\\s*[,}\\]])`, 'g');
-    jsonString = jsonString.replace(regex, (match, p1, p2) => {
-      let val = p2.replace(/(?<!\\)"/g, '\\"');
-      val = val.replace(/\n/g, '\\n');
-      return p1 + val;
-    });
-  }
-
-  // 5. Handle trailing commas
-  jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
-
-  // 6. Close any unclosed braces/brackets (common if max_tokens is hit)
-  let openBraces = (jsonString.match(/\{/g) || []).length - (jsonString.match(/\}/g) || []).length;
-  while (openBraces > 0) { jsonString += '}'; openBraces--; }
-  let openBrackets = (jsonString.match(/\[/g) || []).length - (jsonString.match(/\]/g) || []).length;
-  while (openBrackets > 0) { jsonString += ']'; openBrackets--; }
 
   try {
-    const parsed = JSON.parse(jsonString);
+    let parsed: any = null;
+    for (const candidate of candidates) {
+      parsed = tryParseCandidate(candidate);
+      if (parsed) break;
+    }
+
+    if (!parsed) {
+      console.warn('Unable to parse JSON candidates. Falling back to text mapper.');
+      return buildFallbackFromText(text);
+    }
 
     // Map short keys to expected schema keys
     const mapped = {
@@ -194,8 +283,12 @@ GENERATE RAW JSON DICTIONARY ONLY:`;
     // Validate with the Zod schema
     return ReceiveStrategicAnalysisOutputSchema.parse(mapped);
   } catch (e: any) {
-    console.error("Failed to parse JSON from local model:", text, e);
-    throw new Error(`Data mapping error: ${e.message}`);
+    console.error('Failed to parse JSON from local model:', text.slice(0, 1000), e);
+    try {
+      return buildFallbackFromText(text);
+    } catch (fallbackErr: any) {
+      throw new Error(`Data mapping error: ${fallbackErr?.message || e?.message || 'unknown parse failure'}`);
+    }
   }
 }
 

@@ -59,6 +59,119 @@ export async function generateScenario(
     input: GenerateScenarioInput
 ): Promise<GenerateScenarioOutput> {
 
+    const toRole = (raw?: string): 'FRIENDLY' | 'ENEMY' | 'NEUTRAL' | 'INFRASTRUCTURE' => {
+        const r = String(raw || '').toUpperCase();
+        if (r.includes('FRIEND') || r.includes('BLUE')) return 'FRIENDLY';
+        if (r.includes('ENEMY') || r.includes('HOSTILE') || r.includes('RED')) return 'ENEMY';
+        if (r.includes('INFRA')) return 'INFRASTRUCTURE';
+        return 'NEUTRAL';
+    };
+
+    const toAssetClass = (raw?: string): z.infer<typeof DeployedUnitSchema>['assetClass'] => {
+        const v = String(raw || '').toLowerCase();
+        if (v.includes('mechan')) return 'Mechanized';
+        if (v.includes('armor') || v.includes('armour') || v.includes('tank')) return 'Armor';
+        if (v.includes('artill')) return 'Artillery';
+        if (v.includes('recon') || v.includes('scout')) return 'Recon';
+        if (v.includes('logist') || v.includes('supply')) return 'Logistics';
+        if (v.includes('command') || v.includes('hq')) return 'Command Unit';
+        if (v.includes('infra') || v.includes('facility') || v.includes('structure')) return 'Infrastructure';
+        if (v.includes('objective') || v.includes('outpost')) return 'Objective';
+        return 'Infantry';
+    };
+
+    const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+
+    const seedFrom = (key: string) => {
+        let s = 2166136261;
+        for (let i = 0; i < key.length; i++) {
+            s ^= key.charCodeAt(i);
+            s = Math.imul(s, 16777619);
+        }
+        return () => {
+            s = Math.imul(s ^ (s >>> 13), 1274126177);
+            s ^= s >>> 16;
+            return (s >>> 0) / 4294967296;
+        };
+    };
+
+    const fallbackFromText = (rawText: string): GenerateScenarioOutput => {
+        const rng = seedFrom(`${input.missionContext}|${input.terrainType}|${input.forceBalance}|${input.objectiveType}|${rawText.slice(0, 500)}`);
+        const units: Array<z.infer<typeof DeployedUnitSchema>> = [];
+
+        const re = /([A-Za-z][A-Za-z0-9\-\s]{2,40})\s*\[(\d{1,2})\s*,\s*(\d{1,2})\]/g;
+        const clean = rawText.replace(/\s+/g, ' ');
+        const roleHints = {
+            friendly: /friendly|blue team|blue_team/i,
+            enemy: /enemy|hostile|red team|red_team/i,
+            infra: /infrastructure|facility|structure/i,
+        };
+
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(clean)) !== null && units.length < 12) {
+            const label = m[1].trim();
+            const x = clamp(Number(m[2]) || Math.floor(rng() * 44) + 1, 1, 44);
+            const y = clamp(Number(m[3]) || Math.floor(rng() * 28) + 1, 1, 28);
+
+            const ctxStart = Math.max(0, m.index - 40);
+            const ctx = clean.slice(ctxStart, m.index + label.length + 40);
+            let role: 'FRIENDLY' | 'ENEMY' | 'NEUTRAL' | 'INFRASTRUCTURE' = 'NEUTRAL';
+            if (roleHints.friendly.test(ctx)) role = 'FRIENDLY';
+            else if (roleHints.enemy.test(ctx)) role = 'ENEMY';
+            else if (roleHints.infra.test(ctx)) role = 'INFRASTRUCTURE';
+
+            units.push({
+                label,
+                assetClass: toAssetClass(label),
+                allianceRole: role,
+                x,
+                y,
+            });
+        }
+
+        const forcePreferred = input.forceBalance === 'Friendly Advantage'
+            ? 'FRIENDLY'
+            : input.forceBalance === 'Hostile Advantage'
+                ? 'ENEMY'
+                : 'NEUTRAL';
+
+        while (units.length < 10) {
+            const i = units.length + 1;
+            const role = i % 3 === 0 ? 'ENEMY' : i % 4 === 0 ? 'NEUTRAL' : 'FRIENDLY';
+            const finalRole = forcePreferred !== 'NEUTRAL' && i % 5 === 0 ? forcePreferred as 'FRIENDLY' | 'ENEMY' : role;
+            const assetClass = finalRole === 'NEUTRAL' ? 'Objective' : i % 2 === 0 ? 'Mechanized' : 'Infantry';
+            units.push({
+                label: `${finalRole === 'FRIENDLY' ? 'Alpha' : finalRole === 'ENEMY' ? 'Iron' : 'Objective'} ${assetClass} ${i}`,
+                assetClass,
+                allianceRole: finalRole,
+                x: Math.floor(rng() * 44) + 1,
+                y: Math.floor(rng() * 28) + 1,
+            });
+        }
+
+        const mapPeaks = Array.from({ length: 3 }).map(() => ({
+            cx: Math.floor(rng() * 44) + 1,
+            cy: Math.floor(rng() * 28) + 1,
+            h: Number((0.6 + rng() * 0.8).toFixed(2)),
+            r2: (rng() * 44 * 0.25 + 44 * 0.05) ** 2,
+        }));
+
+        const titleByTerrain: Record<GenerateScenarioInput['terrainType'], string> = {
+            Highland: 'Ridge',
+            Forest: 'Canopy',
+            Urban: 'Sector',
+            Plains: 'Strike',
+            Desert: 'Dune',
+        };
+
+        return GenerateScenarioOutputSchema.parse({
+            scenarioTitle: `Operation ${titleByTerrain[input.terrainType]} Vector`,
+            briefing: `${input.missionContext} Forces are deployed for ${input.objectiveType.toLowerCase()} under ${input.terrainType.toLowerCase()} conditions.`,
+            units,
+            mapPeaks,
+        });
+    };
+
     const instruction = `OUTPUT STRICTLY VALID JSON DICTIONARY ONLY. NO EXPLANATIONS. NO MARKDOWN.
 Generate a tactical scenario as a highly compressed JSON dictionary containing "u" (units array, max 4) and "p" (terrain peaks array, EXACTLY 3).
 
@@ -111,7 +224,8 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
     let jsonString = '';
     const startIndex = text.indexOf('{');
     if (startIndex === -1) {
-        throw new Error("Failed to find valid JSON dictionary in local model output. Output: " + text.slice(0, 50));
+        console.warn('No JSON start token found in scenario output. Using fallback mapper.');
+        return fallbackFromText(text);
     }
 
     let braceCount = 0;
@@ -154,7 +268,8 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
     }
 
     if (!jsonString) {
-        throw new Error("Failed to extract JSON from local model output.");
+        console.warn('JSON extraction failed in scenario output. Using fallback mapper.');
+        return fallbackFromText(text);
     }
 
     // ── JSON Repair Heuristics ──────────────────────────────────────────────────
@@ -250,6 +365,6 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
         });
     } catch (e: any) {
         console.error("Failed to parse JSON from local model:", text, e);
-        throw new Error(`Data mapping error: ${e.message}`);
+        return fallbackFromText(text);
     }
 }
