@@ -16,6 +16,7 @@ const ReceiveStrategicAnalysisInputSchema = z.object({
     .describe(
       'A high-level summary of the current battlefield situation, including friendly and enemy dispositions, key events, and recent intelligence reports.'
     ),
+  missionObjectives: z.string().optional().describe('The primary mission objectives.'),
 });
 export type ReceiveStrategicAnalysisInput = z.infer<
   typeof ReceiveStrategicAnalysisInputSchema
@@ -25,6 +26,11 @@ const ReceiveStrategicAnalysisOutputSchema = z.object({
   strategicOverview: z
     .string()
     .describe('A high-level strategic overview of the current battlefield situation.'),
+  staffAnalysis: z.object({
+    maneuver: z.string().describe('Analysis of unit movements and positioning.'),
+    logistics: z.string().describe('Analysis of supply lines and resource availability.'),
+    intelligence: z.string().describe('Analysis of enemy intent and capabilities.'),
+  }).describe('Detailed staff-level analysis of operational variables.'),
   riskAssessment: z
     .string()
     .describe('An assessment of current operational risks and threats.'),
@@ -49,10 +55,14 @@ const strategicAnalysisPrompt = ai.definePrompt({
   name: 'strategicAnalysisPrompt',
   input: { schema: ReceiveStrategicAnalysisInputSchema },
   output: { schema: ReceiveStrategicAnalysisOutputSchema },
-  prompt: `You are an expert military strategist and tactical analyst operating a highly advanced battlefield command console. Your task is to analyze the current battlefield situation and provide a strategic assessment, including risks, predicted enemy behavior, and recommended actions.
+  prompt: `You are a Senior Military Staff Officer and Tactical AI Strategist. Your task is to provide a comprehensive Operational Briefing and Strategic Assessment.
 
-Here is the current battlefield situation summary:
+MISSION OBJECTIVES: {{{missionObjectives}}}
+
+CURRENT BATTLEFIELD SITUATION:
 {{{battlefieldSummary}}}
+
+Analyze the situation using standard military decision-making processes. Your analysis must be evidence-based, explaining HOW terrain, force ratios, and recent movements influence the projected outcomes.
 
 Provide your analysis in the following JSON format:
 {{jsonSchema output.schema}}`,
