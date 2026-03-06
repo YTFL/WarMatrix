@@ -15,7 +15,7 @@ export function Header({ turn, status }: HeaderProps) {
         </div>
         <div>
           <h1 className="font-headline font-bold text-lg tracking-tight text-[#22D3EE] glow-cyan">
-            TACTICAL<span className="text-white">NEXUS</span>
+            WAR<span className="text-white">MATRIX</span>
           </h1>
           <div className="text-[10px] text-[#9CA3AF] uppercase tracking-widest font-medium -mt-1">
             Command & Control Interface v4.2.0

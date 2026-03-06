@@ -9,7 +9,7 @@ import { CommandConsole } from '@/components/CommandConsole';
 import { receiveStrategicAnalysis, ReceiveStrategicAnalysisOutput } from '@/ai/flows/receive-strategic-analysis';
 import { useToast } from '@/hooks/use-toast';
 
-export default function TacticalNexusPage() {
+export default function WarMatrixPage() {
   const { toast } = useToast();
   const [turn, setTurn] = useState(1);
   const [status, setStatus] = useState<'ACTIVE' | 'AWAITING COMMAND' | 'PROCESSING'>('ACTIVE');

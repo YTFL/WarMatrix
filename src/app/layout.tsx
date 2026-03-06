@@ -2,7 +2,7 @@ import type {Metadata} from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'TacticalNexus Console',
+  title: 'WarMatrix Console',
   description: 'Strategic Battlefield Command Console',
 };
 
