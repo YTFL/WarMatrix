@@ -143,25 +143,37 @@ GENERATE RAW JSON DICTIONARY ONLY:`;
     throw new Error("Failed to extract JSON from local model output.");
   }
 
-  jsonString = jsonString.replace(/<\|.*?\|>/g, '');
-  jsonString = jsonString.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u200B-\u200D\uFEFF]/g, '');
+  // ── JSON Repair Heuristics ──────────────────────────────────────────────────
 
-  // Heuristic: fix unescaped quotes and literal newlines in known strategic analysis keys
-  // This handles common AI formatting glitches where quotes are not escaped within a JSON value.
-  const keysToFix = ["so", "ra", "peb", "m", "l", "i"];
+  // 1. Handle missing commas between key-value pairs: "val" "key": -> "val", "key":
+  jsonString = jsonString.replace(/"\s+("[\w_]+"\s*:)/g, '", $1');
+
+  // 2. Handle missing commas between objects in arrays: } { -> }, {
+  jsonString = jsonString.replace(/\}\s*\{/g, '}, {');
+
+  // 3. Fix unquoted keys: {key: -> {"key":
+  jsonString = jsonString.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+
+  // 4. Fix unescaped quotes and literal newlines in values
+  const keysToFix = ["so", "ra", "peb", "m", "l", "i", "r"];
   for (const key of keysToFix) {
-    // Regex matches the start of the value and lookahead for the probable end of the string
+    // This regex looks for the key, then the value, stopping at the next probable key or end of object
     const regex = new RegExp(`("${key}"\\s*:\\s*")([\\s\\S]*?)(?="\\s*[,}\\]])`, 'g');
     jsonString = jsonString.replace(regex, (match, p1, p2) => {
-      // Escape any " in the value that aren't already escaped and replace literal newlines
       let val = p2.replace(/(?<!\\)"/g, '\\"');
       val = val.replace(/\n/g, '\\n');
       return p1 + val;
     });
   }
 
-  // Handle trailing commas
+  // 5. Handle trailing commas
   jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
+
+  // 6. Close any unclosed braces/brackets (common if max_tokens is hit)
+  let openBraces = (jsonString.match(/\{/g) || []).length - (jsonString.match(/\}/g) || []).length;
+  while (openBraces > 0) { jsonString += '}'; openBraces--; }
+  let openBrackets = (jsonString.match(/\[/g) || []).length - (jsonString.match(/\]/g) || []).length;
+  while (openBrackets > 0) { jsonString += ']'; openBrackets--; }
 
   try {
     const parsed = JSON.parse(jsonString);
