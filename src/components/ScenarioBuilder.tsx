@@ -37,7 +37,8 @@ import { generateScenario, GenerateScenarioInput, GenerateScenarioOutput } from 
 
 type EntryMode = null | 'CUSTOM' | 'AI';
 type UnitType = 'FRIENDLY' | 'ENEMY' | 'OBJECTIVE' | 'NEUTRAL' | 'INFRASTRUCTURE';
-type TerrainType = 'Highland' | 'Forest' | 'Urban' | 'Plains' | 'Desert';
+type TerrainType = 'Highland' | 'Forest' | 'Urban' | 'Plains' | 'Desert' | 'Mountain' | 'Coastal' | 'Arctic';
+type WeatherType = 'Clear' | 'Partly Cloudy' | 'Storm' | 'Fog' | 'Heavy Rain' | 'Sandstorm';
 type ForceBalance = 'Balanced Forces' | 'Friendly Advantage' | 'Hostile Advantage';
 type ObjectiveType = 'Capture Territory' | 'Defend Position' | 'Supply Route Control' | 'Recon Operation';
 
@@ -69,6 +70,7 @@ interface ScenarioBuilderProps {
   onClose: () => void;
   onScenarioGenerated?: (scenario: GenerateScenarioOutput, terrainType: TerrainType) => void;
   onBriefingGenerated?: (title: string, briefing: string) => void;
+  onOperationConfigured?: (name: string, terrain: TerrainType, weather: WeatherType) => void;
   initialMode?: EntryMode;
   isInline?: boolean;
 }
@@ -94,7 +96,9 @@ const ALLIANCE_OPTIONS: { value: UnitType; label: string }[] = [
   { value: 'INFRASTRUCTURE', label: 'Civilian Infrastructure' },
 ];
 
-const TERRAIN_TYPES: TerrainType[] = ['Highland', 'Forest', 'Urban', 'Plains', 'Desert'];
+const TERRAIN_TYPES: TerrainType[] = ['Desert', 'Urban', 'Mountain', 'Forest', 'Coastal', 'Arctic'];
+const WEATHER_TYPES: WeatherType[] = ['Clear', 'Partly Cloudy', 'Storm', 'Fog', 'Heavy Rain', 'Sandstorm'];
+const AI_TERRAIN_TYPES: TerrainType[] = ['Highland', 'Forest', 'Urban', 'Plains', 'Desert'];
 const FORCE_BALANCES: ForceBalance[] = ['Balanced Forces', 'Friendly Advantage', 'Hostile Advantage'];
 const OBJECTIVE_TYPES: ObjectiveType[] = ['Capture Territory', 'Defend Position', 'Supply Route Control', 'Recon Operation'];
 
@@ -139,7 +143,7 @@ type AIGenStatus = 'idle' | 'rolling' | 'generating' | 'done' | 'error';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScenarioGenerated, onBriefingGenerated, initialMode = null, isInline = false }: ScenarioBuilderProps) {
+export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScenarioGenerated, onBriefingGenerated, onOperationConfigured, initialMode = null, isInline = false }: ScenarioBuilderProps) {
 
   // ── Entry mode gate ──────────────────────────────────────────────────────────
   const [entryMode, setEntryMode] = useState<EntryMode>(initialMode);
@@ -157,8 +161,16 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
       setNewLabel('');
       setGridX('');
       setGridY('');
+      setOperationName('');
+      setSelectedTerrain('Urban');
+      setSelectedWeather('Clear');
     }
   }, [isOpen, initialMode]);
+
+  // ── Scenario configuration state ─────────────────────────────────────────────
+  const [operationName, setOperationName] = useState('');
+  const [selectedTerrain, setSelectedTerrain] = useState<TerrainType>('Urban');
+  const [selectedWeather, setSelectedWeather] = useState<WeatherType>('Clear');
 
   // ── Manual deployment state ──────────────────────────────────────────────────
   const [newLabel, setNewLabel] = useState('');
@@ -209,14 +221,14 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
     setTermLogs([]);
 
     // Roll random values
-    const terrain = pickRandom(TERRAIN_TYPES);
+    const terrain = pickRandom(AI_TERRAIN_TYPES);
     const forceBalance = pickRandom(FORCE_BALANCES);
     const objectiveType = pickRandom(OBJECTIVE_TYPES);
     const missionContext = pickRandom(MISSION_CONTEXT_TEMPLATES);
 
     const params: GenerateScenarioInput = {
       missionContext,
-      terrainType: terrain,
+      terrainType: terrain as GenerateScenarioInput['terrainType'],
       forceBalance,
       objectiveType,
     };
@@ -479,7 +491,98 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
               ════════════════════════════════════════ */}
           {entryMode === 'CUSTOM' && (
             <>
-              <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
+              <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5 custom-scrollbar">
+
+                {/* ──────── SCENARIO CONFIGURATION ──────── */}
+                <div className="rounded-sm border border-[#1F6FEB]/20 bg-[#0A0F1E]/70 p-4 flex flex-col gap-4">
+                  <div className="flex items-center gap-2 pb-1 border-b border-[#1F6FEB]/15">
+                    <div className="w-1 h-3 bg-[#1F6FEB]/60 rounded-full" />
+                    <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-[#1F6FEB]/80">Scenario Configuration</span>
+                  </div>
+
+                  {/* Operation Name */}
+                  <div className="space-y-1.5">
+                    <label className="text-[8px] text-[#9CA3AF] uppercase font-bold tracking-wider">Operation Name</label>
+                    <Input
+                      placeholder="Operation Phantom Dune"
+                      value={operationName}
+                      onChange={(e) => setOperationName(e.target.value)}
+                      className="h-9 bg-[#0A0F1C] border-[#1F6FEB]/20 text-[11px] font-mono placeholder:text-[#374151] focus:border-[#3A8DFF]/60"
+                    />
+                    {operationName.trim() && (
+                      <p className="text-[7px] font-mono text-[#1F6FEB]/50 uppercase tracking-wider">
+                        Mission title: {operationName.trim()}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Terrain Type */}
+                  <div className="space-y-2">
+                    <label className="text-[8px] text-[#9CA3AF] uppercase font-bold tracking-wider">Terrain Type</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {TERRAIN_TYPES.map((terrain) => {
+                        const active = selectedTerrain === terrain;
+                        return (
+                          <button
+                            key={terrain}
+                            onClick={() => setSelectedTerrain(terrain)}
+                            className="px-2.5 py-1 rounded-sm text-[8px] font-bold uppercase tracking-wider border transition-all duration-200"
+                            style={
+                              active
+                                ? {
+                                  background: 'rgba(31,111,235,0.22)',
+                                  borderColor: 'rgba(31,111,235,0.75)',
+                                  color: '#60A5FA',
+                                  boxShadow: '0 0 10px rgba(31,111,235,0.30)',
+                                }
+                                : {
+                                  background: 'rgba(10,15,30,0.55)',
+                                  borderColor: 'rgba(31,111,235,0.15)',
+                                  color: '#4B5563',
+                                }
+                            }
+                          >
+                            {terrain}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Weather Type */}
+                  <div className="space-y-2">
+                    <label className="text-[8px] text-[#9CA3AF] uppercase font-bold tracking-wider">Weather Conditions</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {WEATHER_TYPES.map((weather) => {
+                        const active = selectedWeather === weather;
+                        return (
+                          <button
+                            key={weather}
+                            onClick={() => setSelectedWeather(weather)}
+                            className="px-2.5 py-1 rounded-sm text-[8px] font-bold uppercase tracking-wider border transition-all duration-200"
+                            style={
+                              active
+                                ? {
+                                  background: 'rgba(31,111,235,0.18)',
+                                  borderColor: 'rgba(96,165,250,0.65)',
+                                  color: '#93C5FD',
+                                  boxShadow: '0 0 8px rgba(96,165,250,0.25)',
+                                }
+                                : {
+                                  background: 'rgba(10,15,30,0.55)',
+                                  borderColor: 'rgba(31,111,235,0.12)',
+                                  color: '#4B5563',
+                                }
+                            }
+                          >
+                            {weather}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
                   {/* ──────── LEFT: DEPLOYMENT CONTROLS ──────── */}
@@ -679,7 +782,16 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
                   {units.length > 0 ? `${units.length} unit${units.length !== 1 ? 's' : ''} ready for deployment` : 'Add units to configure scenario'}
                 </span>
                 <Button
-                  onClick={onClose}
+                  onClick={() => {
+                    if (onOperationConfigured) {
+                      onOperationConfigured(
+                        operationName.trim() || 'Custom Scenario',
+                        selectedTerrain,
+                        selectedWeather,
+                      );
+                    }
+                    onClose();
+                  }}
                   className="bg-[#1F6FEB] hover:bg-[#3A8DFF] text-[10px] font-bold uppercase tracking-widest px-8 h-9 transition-all"
                 >
                   Finalize Scenario

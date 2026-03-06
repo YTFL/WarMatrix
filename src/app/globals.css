@@ -36,12 +36,62 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground font-body overflow-hidden;
-    background-image: 
+    background-image:
       radial-gradient(circle at 50% 50%, rgba(13, 34, 58, 0.2) 0%, rgba(10, 10, 10, 1) 100%),
       url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%231f6feb' fill-opacity='0.02'%3E%3Cpath d='M50 50v-1h1v1h-1zm0-50V0h1v1h-1zM0 50v-1h1v1H0zM0 0h1v1H0V0z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
+
+  /* Hide native scrollbars globally */
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ── Custom HUD Scrollbar ─────────────────────────────────────── */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 111, 235, 0.45) rgba(10, 20, 40, 0.35);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  display: block;
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(10, 20, 40, 0.35);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(31, 111, 235, 0.45);
+  border-radius: 4px;
+  box-shadow: 0 0 6px rgba(31, 111, 235, 0.35);
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(58, 141, 255, 0.80);
+  box-shadow: 0 0 10px rgba(58, 141, 255, 0.55);
+}
+
+/* Show scrollbar only when scrolling (via opacity fade) */
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  opacity: 0;
+  transition: opacity 0.3s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb,
+.custom-scrollbar:focus-within::-webkit-scrollbar-thumb {
+  opacity: 1;
 }
 
 .glow-blue {
@@ -54,8 +104,15 @@
 
 
 @keyframes pulse-slow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .animate-pulse-slow {

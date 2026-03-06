@@ -16,11 +16,9 @@ import {
   Boxes,
   Zap,
   BrainCircuit,
-  Terminal,
   ShieldAlert,
   MessageSquare,
   Send,
-  Cpu,
   Maximize2,
   MapPin,
   AlertCircle,
@@ -30,7 +28,8 @@ import {
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-type TerrainType = 'Highland' | 'Forest' | 'Urban' | 'Plains' | 'Desert';
+type TerrainType = 'Highland' | 'Forest' | 'Urban' | 'Plains' | 'Desert' | 'Mountain' | 'Coastal' | 'Arctic';
+type WeatherType = 'Clear' | 'Partly Cloudy' | 'Storm' | 'Fog' | 'Heavy Rain' | 'Sandstorm';
 
 interface Unit {
   id: string;
@@ -46,6 +45,7 @@ interface ActiveScenario {
   title: string;
   briefing: string;
   terrainType: TerrainType;
+  weather?: WeatherType;
   units: Unit[];
   mapPeaks?: { cx: number; cy: number; h: number; r2: number }[];
 }
@@ -59,7 +59,29 @@ const WIDGET_SOURCE_STYLE: Record<MessageSource, { label: string; color: string;
   SYSTEM: { label: 'SYSTEM', color: '#22C55E', dot: '#16A34A' },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Weather display helpers ───────────────────────────────────────────────────
+
+function weatherTemp(w?: WeatherType): string {
+  switch (w) {
+    case 'Clear': return '24°C';
+    case 'Partly Cloudy': return '18°C';
+    case 'Storm': return '8°C';
+    case 'Fog': return '15°C';
+    case 'Heavy Rain': return '12°C';
+    case 'Sandstorm': return '34°C';
+    default: return '18°C';
+  }
+}
+
+function weatherVisibility(w?: WeatherType): string {
+  switch (w) {
+    case 'Storm': return '2.1 KM';
+    case 'Fog': return '0.4 KM';
+    case 'Heavy Rain': return '3.5 KM';
+    case 'Sandstorm': return '1.2 KM';
+    default: return '8.5 KM';
+  }
+}
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
@@ -70,8 +92,9 @@ export default function WarMatrixPage() {
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysis, setAnalysis] = useState<ReceiveStrategicAnalysisOutput | null>(null);
   const [role, setRole] = useState<'BLUE_TEAM' | 'RED_TEAM'>('BLUE_TEAM');
-  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
-  const [builderInitialMode, setBuilderInitialMode] = useState<any>(null);
+  const [centerScenarioMode, setCenterScenarioMode] = useState<'default' | 'random' | 'custom'>('default');
+  const [isBuilderWorkspaceActive, setIsBuilderWorkspaceActive] = useState(false);
+  const [builderScenarioMode, setBuilderScenarioMode] = useState<'selection' | 'random' | 'custom'>('selection');
   const [isCommsConsoleOpen, setIsCommsConsoleOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [lastResult, setLastResult] = useState<{
@@ -82,7 +105,6 @@ export default function WarMatrixPage() {
   } | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(INITIAL_LOG);
   const widgetChatEndRef = React.useRef<HTMLDivElement>(null);
-
 
   const handleBriefingGenerated = (title: string, briefing: string) => {
     const briefingMsg: ChatMessage = {
@@ -179,21 +201,54 @@ export default function WarMatrixPage() {
     });
   };
 
+  // ── Pending operation config from custom builder ─────────────────────────────
+  const [pendingOperationConfig, setPendingOperationConfig] = React.useState<{
+    name: string;
+    terrain: TerrainType;
+    weather: WeatherType;
+  } | null>(null);
+
+  const handleOperationConfigured = (name: string, terrain: TerrainType, weather: WeatherType) => {
+    setPendingOperationConfig({ name, terrain, weather });
+  };
+
   // ── Handle custom builder closing ─────────────────────────────────────────────
-  const handleBuilderClose = () => {
-    setIsBuilderOpen(false);
-    // If units were manually deployed, create a custom scenario
+  const handleBuilderWorkspaceClose = () => {
+    setIsBuilderWorkspaceActive(false);
+    setBuilderScenarioMode('selection');
+    const cfg = pendingOperationConfig;
     if (units.length > 0 && !activeScenario) {
       setActiveScenario({
-        title: 'Custom Scenario',
+        title: cfg?.name || 'Custom Scenario',
         briefing: 'Manually configured battlefield scenario.',
-        terrainType: 'Highland',
+        terrainType: cfg?.terrain || 'Urban',
+        weather: cfg?.weather || 'Clear',
+        units,
+      });
+    } else if (cfg && activeScenario) {
+      setActiveScenario(prev => prev ? {
+        ...prev,
+        title: cfg.name,
+        terrainType: cfg.terrain,
+        weather: cfg.weather,
+      } : prev);
+    }
+    setPendingOperationConfig(null);
+  };
+
+  const handleCenterScenarioClose = () => {
+    setCenterScenarioMode('default');
+    const cfg = pendingOperationConfig;
+    if (units.length > 0 && !activeScenario) {
+      setActiveScenario({
+        title: cfg?.name || 'Custom Scenario',
+        briefing: 'Manually configured battlefield scenario.',
+        terrainType: cfg?.terrain || 'Urban',
+        weather: cfg?.weather || 'Clear',
         units,
       });
     }
-    if (activeScenario && units !== activeScenario.units) {
-      setActiveScenario(prev => prev ? { ...prev, units } : null);
-    }
+    setPendingOperationConfig(null);
   };
 
   const handleExecuteCommand = async (e?: React.FormEvent) => {
@@ -292,14 +347,44 @@ export default function WarMatrixPage() {
         turn={turn}
         status={status}
         onOpenBuilder={() => {
-          setBuilderInitialMode(null);
-          setIsBuilderOpen(true);
+          setBuilderScenarioMode('selection');
+          setIsBuilderWorkspaceActive(true);
         }}
       />
 
       <main className="flex-1 p-4 flex gap-4 overflow-hidden">
         {/* LEFT ZONE: Intel Widgets */}
-        <div className="w-64 flex flex-col gap-4 shrink-0 overflow-y-auto pr-1 scrollbar-hide">
+        <div className="w-64 flex flex-col gap-4 shrink-0 overflow-y-auto pr-1 custom-scrollbar">
+          <TacticalWidget title="Terrain Status" icon={Boxes}>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-[#E6EDF3] font-medium">
+                {activeScenario ? activeScenario.terrainType : '—'}
+              </span>
+              <div className="flex justify-between items-center text-[9px] text-[#9CA3AF] uppercase font-bold">
+                <span>Status</span>
+                <span className={activeScenario ? 'text-[#F59E0B]' : 'text-[#4B5563]'}>
+                  {activeScenario ? 'OPERATIONAL' : 'STANDBY'}
+                </span>
+              </div>
+            </div>
+          </TacticalWidget>
+
+          <TacticalWidget title="Weather Status" icon={CloudRain}>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-[#E6EDF3] font-medium">
+                {activeScenario
+                  ? `${activeScenario.weather ?? 'Partly Cloudy'} / ${weatherTemp(activeScenario.weather)}`
+                  : '—'}
+              </span>
+              <div className="flex justify-between items-center text-[9px] text-[#9CA3AF] uppercase font-bold">
+                <span>Visibility</span>
+                <span className={activeScenario ? 'text-[#22C55E]' : 'text-[#4B5563]'}>
+                  {activeScenario ? weatherVisibility(activeScenario.weather) : 'N/A'}
+                </span>
+              </div>
+            </div>
+          </TacticalWidget>
+
           <TacticalWidget title="Comm Status" icon={Radio}>
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2 mb-1">
@@ -396,86 +481,40 @@ export default function WarMatrixPage() {
               </div>
             </TacticalWidget>
           )}
-
-          <TacticalWidget title="Simulation Engine" icon={Cpu}>
-            <div className="flex flex-col gap-3">
-              <div className="flex justify-between items-end">
-                <div className="flex flex-col">
-                  <span className="text-[9px] text-[#9CA3AF] uppercase font-bold">Mission Turn</span>
-                  <span className="text-xl font-headline text-white leading-none">{turn.toString().padStart(3, '0')}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-[9px] text-[#9CA3AF] uppercase font-bold block">Outcome Prob.</span>
-                  <span className={`text-sm font-bold ${activeScenario ? 'text-[#22C55E]' : 'text-[#374151]'}`}>
-                    {activeScenario ? '84.2%' : 'N/A'}
-                  </span>
-                </div>
-              </div>
-              <div className="text-[9px] font-mono text-[#4B5563] border-t border-[#1F6FEB]/10 pt-2">
-                STATE: {!activeScenario
-                  ? 'STANDBY // NO_SCENARIO'
-                  : status === 'ACTIVE' ? 'SYNCHRONIZED' : 'PROCESSING_BUFFER'}
-              </div>
-            </div>
-          </TacticalWidget>
         </div>
 
         {/* CENTER ZONE */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* MAP ZONE */}
           <div className="flex-1 relative overflow-hidden border border-[#1F6FEB]/20">
-            {activeScenario ? (
-              <>
-                <TacticalMapDisplay
-                  units={visibleUnits}
-                  terrainType={terrainType}
-                  scenarioTitle={activeScenario.title}
-                  mapPeaks={activeScenario.mapPeaks}
-                />
-
-                {/* Intelligence Overlays */}
-                <div className="absolute top-5 left-5 z-20 flex flex-col gap-3 w-56 pointer-events-none">
-                  <div className="pointer-events-auto">
-                    <TacticalWidget title="Terrain Status" icon={Boxes}>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[11px] text-[#E6EDF3] font-medium">
-                          {activeScenario ? activeScenario.terrainType : '—'}
-                        </span>
-                        <div className="flex justify-between items-center text-[9px] text-[#9CA3AF] uppercase font-bold">
-                          <span>Status</span>
-                          <span className={activeScenario ? 'text-[#F59E0B]' : 'text-[#4B5563]'}>
-                            {activeScenario ? 'OPERATIONAL' : 'STANDBY'}
-                          </span>
-                        </div>
-                      </div>
-                    </TacticalWidget>
-                  </div>
-
-                  <div className="pointer-events-auto">
-                    <TacticalWidget title="Weather Status" icon={CloudRain}>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[11px] text-[#E6EDF3] font-medium">
-                          {activeScenario ? 'Partly Cloudy / 18°C' : '—'}
-                        </span>
-                        <div className="flex justify-between items-center text-[9px] text-[#9CA3AF] uppercase font-bold">
-                          <span>Visibility</span>
-                          <span className={activeScenario ? 'text-[#22C55E]' : 'text-[#4B5563]'}>
-                            {activeScenario ? '8.5 KM' : 'N/A'}
-                          </span>
-                        </div>
-                      </div>
-                    </TacticalWidget>
-                  </div>
-                </div>
-              </>
-            ) : isBuilderOpen ? (
+            {isBuilderWorkspaceActive ? (
               <ScenarioBuilder
                 units={units as any}
                 onUpdateUnits={(u) => setUnits(u as Unit[])}
-                isOpen={isBuilderOpen}
-                onClose={() => setIsBuilderOpen(false)}
+                isOpen={true}
+                onClose={handleBuilderWorkspaceClose}
                 onScenarioGenerated={handleScenarioGenerated}
-                initialMode={builderInitialMode}
+                onBriefingGenerated={handleBriefingGenerated}
+                onOperationConfigured={handleOperationConfigured}
+                initialMode={builderScenarioMode === 'selection' ? null : builderScenarioMode === 'random' ? 'AI' : 'CUSTOM'}
+                isInline={true}
+              />
+            ) : activeScenario ? (
+              <TacticalMapDisplay
+                units={visibleUnits}
+                terrainType={terrainType}
+                scenarioTitle={activeScenario.title}
+                mapPeaks={activeScenario.mapPeaks}
+              />
+            ) : centerScenarioMode !== 'default' ? (
+              <ScenarioBuilder
+                units={units as any}
+                onUpdateUnits={(u) => setUnits(u as Unit[])}
+                isOpen={true}
+                onClose={handleCenterScenarioClose}
+                onScenarioGenerated={handleScenarioGenerated}
+                onOperationConfigured={handleOperationConfigured}
+                initialMode={centerScenarioMode === 'random' ? 'AI' : 'CUSTOM'}
                 isInline={true}
               />
             ) : (
@@ -504,7 +543,6 @@ export default function WarMatrixPage() {
                 <div className="absolute bottom-3 left-3 w-5 h-5 border-b border-l border-[#1F6FEB]/30" />
                 <div className="absolute bottom-3 right-3 w-5 h-5 border-b border-r border-[#1F6FEB]/30" />
 
-
                 {/* Status icon */}
                 <div className="relative z-10 flex flex-col items-center gap-5">
                   <div
@@ -530,10 +568,7 @@ export default function WarMatrixPage() {
                   {/* Action buttons */}
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => {
-                        setBuilderInitialMode('AI');
-                        setIsBuilderOpen(true);
-                      }}
+                      onClick={() => { setCenterScenarioMode('random'); }}
                       className="flex items-center gap-2 px-5 py-2.5 rounded-sm border text-[9px] font-bold uppercase tracking-widest transition-all"
                       style={{
                         background: 'rgba(139,92,246,0.10)',
@@ -553,10 +588,7 @@ export default function WarMatrixPage() {
                       Random Scenario
                     </button>
                     <button
-                      onClick={() => {
-                        setBuilderInitialMode(null);
-                        setIsBuilderOpen(true);
-                      }}
+                      onClick={() => { setCenterScenarioMode('custom'); }}
                       className="flex items-center gap-2 px-5 py-2.5 rounded-sm border text-[9px] font-bold uppercase tracking-widest transition-all"
                       style={{
                         background: 'rgba(31,111,235,0.08)',
@@ -608,7 +640,7 @@ export default function WarMatrixPage() {
           >
             <div className="flex-1 flex flex-col min-h-0">
               {/* Message Feed */}
-              <div className="flex-1 overflow-y-auto scrollbar-hide py-2 flex flex-col gap-2">
+              <div className="flex-1 overflow-y-auto custom-scrollbar py-2 flex flex-col gap-2">
                 {chatMessages.map((msg) => {
                   const style = WIDGET_SOURCE_STYLE[msg.source as MessageSource] || WIDGET_SOURCE_STYLE.SYSTEM;
                   const isUser = msg.source === 'COMMAND_INPUT';
@@ -673,14 +705,6 @@ export default function WarMatrixPage() {
         </div>
       </main>
 
-      <ScenarioBuilder
-        units={units as any}
-        onUpdateUnits={(u) => setUnits(u as Unit[])}
-        isOpen={isBuilderOpen}
-        onClose={handleBuilderClose}
-        onScenarioGenerated={handleScenarioGenerated}
-        onBriefingGenerated={handleBriefingGenerated}
-      />
       <SecureCommsConsole
         messages={chatMessages}
         onMessagesChange={setChatMessages}
