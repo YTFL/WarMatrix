@@ -91,7 +91,7 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
         body: JSON.stringify({
             instruction,
             battlefield_data,
-            max_new_tokens: 300,    // Hard cap for max speed
+            max_new_tokens: 500,    // Increased cap for safety
             use_cache: true,
             do_sample: false,       // Greedy decoding
         })
@@ -157,10 +157,22 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
         throw new Error("Failed to extract JSON from local model output.");
     }
 
-    // Extreme sanitization to fix AI non-whitespace garbage/tokens bleeding into the JSON dictionary
     jsonString = jsonString.replace(/<\|.*?\|>/g, '');
-    jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
     jsonString = jsonString.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u200B-\u200D\uFEFF]/g, '');
+
+    // Heuristic: fix unescaped quotes and literal newlines in labels
+    const keysToFix = ["l"];
+    for (const key of keysToFix) {
+        const regex = new RegExp(`("${key}"\\s*:\\s*")([\\s\\S]*?)(?="\\s*[,}\\]])`, 'g');
+        jsonString = jsonString.replace(regex, (match, p1, p2) => {
+            let val = p2.replace(/(?<!\\)"/g, '\\"');
+            val = val.replace(/\n/g, '\\n');
+            return p1 + val;
+        });
+    }
+
+    // Handle trailing commas
+    jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
 
     try {
         const parsedObj = JSON.parse(jsonString);

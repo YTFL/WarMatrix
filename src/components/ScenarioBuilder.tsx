@@ -68,6 +68,7 @@ interface ScenarioBuilderProps {
   isOpen: boolean;
   onClose: () => void;
   onScenarioGenerated?: (scenario: GenerateScenarioOutput, terrainType: TerrainType) => void;
+  onBriefingGenerated?: (title: string, briefing: string) => void;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -136,7 +137,7 @@ type AIGenStatus = 'idle' | 'rolling' | 'generating' | 'done' | 'error';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScenarioGenerated }: ScenarioBuilderProps) {
+export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScenarioGenerated, onBriefingGenerated }: ScenarioBuilderProps) {
 
   // ── Entry mode gate ──────────────────────────────────────────────────────────
   const [entryMode, setEntryMode] = useState<EntryMode>(null);
@@ -255,6 +256,11 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
 
       setAiResult(result);
       setAiStatus('done');
+
+      // Trigger briefing callback if provided
+      if (onBriefingGenerated) {
+        onBriefingGenerated(result.scenarioTitle, result.briefing);
+      }
     } catch (err: any) {
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       pushLog('ERR', `Generation failed after ${elapsed}s`);

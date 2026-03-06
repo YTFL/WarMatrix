@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Header } from '@/components/Header';
 import { TacticalMapDisplay } from '@/components/TacticalMapDisplay';
 import { ScenarioBuilder } from '@/components/ScenarioBuilder';
-import { SecureCommsConsole } from '@/components/SecureCommsConsole';
+import { SecureCommsConsole, ChatMessage, MessageSource, INITIAL_LOG, nowTs } from '@/components/SecureCommsConsole';
 import { receiveStrategicAnalysis, ReceiveStrategicAnalysisOutput } from '@/ai/flows/receive-strategic-analysis';
 import { GenerateScenarioOutput } from '@/ai/flows/generate-scenario';
 import { useToast } from '@/hooks/use-toast';
@@ -50,30 +50,16 @@ interface ActiveScenario {
   mapPeaks?: { cx: number; cy: number; h: number; r2: number }[];
 }
 
-type MessageSource = 'COMMAND_INPUT' | 'AI_STRATEGIST' | 'SYSTEM';
-
-interface WidgetMessage {
-  id: string;
-  source: MessageSource;
-  body: string;
-  timestamp: string;
-}
-
 const WIDGET_SOURCE_STYLE: Record<MessageSource, { label: string; color: string; dot: string }> = {
   COMMAND_INPUT: { label: 'COMMANDER', color: '#E6EDF3', dot: '#9CA3AF' },
   AI_STRATEGIST: { label: 'AI STRATEGIST', color: '#3A8DFF', dot: '#1F6FEB' },
+  SIMULATION_ENGINE: { label: 'SIMULATION ENGINE', color: '#A78BFA', dot: '#7C3AED' },
+  INTEL_DIVISION: { label: 'INTEL DIVISION', color: '#38BDF8', dot: '#0EA5E9' },
+  FOG_OF_WAR_MODULE: { label: 'FOG OF WAR MODULE', color: '#94A3B8', dot: '#475569' },
   SYSTEM: { label: 'SYSTEM', color: '#22C55E', dot: '#16A34A' },
 };
 
-const INITIAL_WIDGET_LOG: WidgetMessage[] = [
-  { id: 'w-1', source: 'SYSTEM', body: 'Encrypted link established on channel WARMATRIX-ALPHA. AES-256 active.', timestamp: '00:00:01' },
-  { id: 'w-2', source: 'SYSTEM', body: 'AI Strategist core loaded. Awaiting commander directive.', timestamp: '00:00:02' },
-  { id: 'w-3', source: 'AI_STRATEGIST', body: 'SYSTEM READY. Strategic Operations Channel is active. All simulation subsystems online.', timestamp: '00:00:03' },
-];
-
-function getNowTs() {
-  return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
@@ -93,12 +79,40 @@ export default function WarMatrixPage() {
     risk: number;
     outcome: string;
   } | null>(null);
-  const [widgetMessages, setWidgetMessages] = useState<WidgetMessage[]>(INITIAL_WIDGET_LOG);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(INITIAL_LOG);
   const widgetChatEndRef = React.useRef<HTMLDivElement>(null);
+
+
+  const handleBriefingGenerated = (title: string, briefing: string) => {
+    const briefingMsg: ChatMessage = {
+      id: `briefing-${Date.now()}`,
+      source: 'AI_STRATEGIST',
+      headline: `MISSION BRIEFING: ${title}`,
+      body: briefing,
+      timestamp: nowTs(),
+      classification: 'SECRET',
+    };
+
+    const statusMsg: ChatMessage = {
+      id: `status-${Date.now() + 1}`,
+      source: 'INTEL_DIVISION',
+      headline: 'OPERATIONAL STATUS REPORT',
+      body: `Battlefield topography analyzed. Tactical deployment ready in sector. High-priority objectives identified. Communications uplink secure.`,
+      timestamp: nowTs(),
+      classification: 'CONFIDENTIAL',
+    };
+
+    setChatMessages(prev => [...prev, briefingMsg, statusMsg]);
+
+    toast({
+      title: "Incoming Transmission",
+      description: "AI Strategist has uploaded the mission briefing.",
+    });
+  };
 
   useEffect(() => {
     widgetChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [widgetMessages]);
+  }, [chatMessages]);
 
   // ── Scenario state ───────────────────────────────────────────────────────────
   const [activeScenario, setActiveScenario] = useState<ActiveScenario | null>(null);
@@ -194,49 +208,73 @@ export default function WarMatrixPage() {
     }
 
     const command = inputValue.trim();
-
-    // Add user message to widget feed
-    const userMsg: WidgetMessage = {
-      id: `uw-${Date.now()}`,
-      source: 'COMMAND_INPUT',
-      body: command,
-      timestamp: getNowTs(),
-    };
-    setWidgetMessages(prev => [...prev, userMsg]);
-
     setInputValue('');
     setStatus('PROCESSING');
 
-    setTimeout(() => {
-      setTurn(prev => prev + 1);
-      const success = Math.floor(Math.random() * 40) + 50;
-      const risk = Math.floor(Math.random() * 30) + 10;
-      const outcome = `STAFF REPORT: Directive processed. Position shifts recorded.`;
+    // Add user message to shared chat feed
+    const userMsg: ChatMessage = {
+      id: `uw-${Date.now()}`,
+      source: 'COMMAND_INPUT',
+      body: command,
+      timestamp: nowTs(),
+    };
+    setChatMessages(prev => [...prev, userMsg]);
 
-      setUnits(prev => prev.map(u => ({
-        ...u,
-        x: Math.max(1, Math.min(11, u.x + (Math.random() > 0.8 ? 1 : Math.random() < 0.2 ? -1 : 0))),
-        y: Math.max(1, Math.min(7, u.y + (Math.random() > 0.8 ? 1 : Math.random() < 0.2 ? -1 : 0)))
-      })));
-
-      setLastResult({
-        command,
-        success,
-        risk,
-        outcome
+    try {
+      const res = await fetch('/api/sitrep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          directive: command,
+          mode: 'GENERAL',
+          battlefield_data: activeScenario
+            ? `Turn ${turn}. Role: ${role}. Scenario: ${activeScenario.title}. Terrain: ${activeScenario.terrainType}. ${units.map(u => `${u.label} (${u.type}) at [${u.x},${u.y}]`).join(', ')}.`
+            : `No scenario active.`,
+        }),
       });
 
-      // Add system response to widget feed
-      const sysMsg: WidgetMessage = {
+      const data = await res.json();
+
+      if (res.ok) {
+        const aiMsg: ChatMessage = {
+          id: `ai-${Date.now()}`,
+          source: 'AI_STRATEGIST',
+          headline: 'TACTICAL AI RESPONSE',
+          body: data.response ?? '(Empty response from AI server)',
+          timestamp: nowTs(),
+          classification: 'CONFIDENTIAL',
+        };
+        setChatMessages(prev => [...prev, aiMsg]);
+
+        // Update simulation state as well
+        setTurn(prev => prev + 1);
+        setUnits(prev => prev.map(u => ({
+          ...u,
+          x: Math.max(1, Math.min(11, u.x + (Math.random() > 0.8 ? 1 : Math.random() < 0.2 ? -1 : 0))),
+          y: Math.max(1, Math.min(7, u.y + (Math.random() > 0.8 ? 1 : Math.random() < 0.2 ? -1 : 0)))
+        })));
+
+        setLastResult({
+          command,
+          success: 85,
+          risk: 15,
+          outcome: `AI STRATEGIST: Tactical directive acknowledged. Adjusting positioning.`
+        });
+      } else {
+        throw new Error(data.error || 'AI server failed');
+      }
+    } catch (err: any) {
+      console.error('Command execution failed:', err);
+      const sysMsg: ChatMessage = {
         id: `sw-${Date.now()}`,
         source: 'SYSTEM',
-        body: outcome,
-        timestamp: getNowTs(),
+        body: `UPLINK FAILURE — ${err.message || 'Check AI server status.'}`,
+        timestamp: nowTs(),
       };
-      setWidgetMessages(prev => [...prev, sysMsg]);
-
+      setChatMessages(prev => [...prev, sysMsg]);
+    } finally {
       setStatus('ACTIVE');
-    }, 1500);
+    }
   };
 
   const visibleUnits = activeScenario ? units.filter(u => {
@@ -553,8 +591,8 @@ export default function WarMatrixPage() {
             <div className="flex-1 flex flex-col min-h-0">
               {/* Message Feed */}
               <div className="flex-1 overflow-y-auto scrollbar-hide py-2 flex flex-col gap-2">
-                {widgetMessages.map((msg) => {
-                  const style = WIDGET_SOURCE_STYLE[msg.source];
+                {chatMessages.map((msg) => {
+                  const style = WIDGET_SOURCE_STYLE[msg.source as MessageSource] || WIDGET_SOURCE_STYLE.SYSTEM;
                   const isUser = msg.source === 'COMMAND_INPUT';
                   return (
                     <div key={msg.id} className={`flex flex-col gap-0.5 ${isUser ? 'items-end' : 'items-start'}`}>
@@ -574,6 +612,11 @@ export default function WarMatrixPage() {
                           borderColor: 'rgba(31,111,235,0.10)',
                         }}
                       >
+                        {msg.headline && (
+                          <p className="text-[7px] font-bold uppercase tracking-wider text-[#E6EDF3] mb-1 leading-tight">
+                            {msg.headline}
+                          </p>
+                        )}
                         <p className="text-[9px] font-mono leading-relaxed text-[#9CA3AF]">
                           {msg.body}
                         </p>
@@ -618,9 +661,12 @@ export default function WarMatrixPage() {
         isOpen={isBuilderOpen}
         onClose={handleBuilderClose}
         onScenarioGenerated={handleScenarioGenerated}
+        onBriefingGenerated={handleBriefingGenerated}
       />
 
       <SecureCommsConsole
+        messages={chatMessages}
+        onMessagesChange={setChatMessages}
         isOpen={isCommsConsoleOpen}
         onClose={() => setIsCommsConsoleOpen(false)}
         battlefieldContext={activeScenario

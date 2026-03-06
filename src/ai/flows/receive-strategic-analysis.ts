@@ -77,7 +77,7 @@ GENERATE RAW JSON DICTIONARY ONLY:`;
     body: JSON.stringify({
       instruction,
       battlefield_data,
-      max_new_tokens: 300,    // Hard cap for rapid output
+      max_new_tokens: 500,    // Increased cap for safety
       use_cache: true,
       do_sample: false,       // Greedy decoding ensures fast, structured predictability
     })
@@ -143,10 +143,25 @@ GENERATE RAW JSON DICTIONARY ONLY:`;
     throw new Error("Failed to extract JSON from local model output.");
   }
 
-  // Extreme sanitization to fix AI non-whitespace garbage/tokens bleeding into the JSON dictionary
   jsonString = jsonString.replace(/<\|.*?\|>/g, '');
-  jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
   jsonString = jsonString.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u200B-\u200D\uFEFF]/g, '');
+
+  // Heuristic: fix unescaped quotes and literal newlines in known strategic analysis keys
+  // This handles common AI formatting glitches where quotes are not escaped within a JSON value.
+  const keysToFix = ["so", "ra", "peb", "m", "l", "i"];
+  for (const key of keysToFix) {
+    // Regex matches the start of the value and lookahead for the probable end of the string
+    const regex = new RegExp(`("${key}"\\s*:\\s*")([\\s\\S]*?)(?="\\s*[,}\\]])`, 'g');
+    jsonString = jsonString.replace(regex, (match, p1, p2) => {
+      // Escape any " in the value that aren't already escaped and replace literal newlines
+      let val = p2.replace(/(?<!\\)"/g, '\\"');
+      val = val.replace(/\n/g, '\\n');
+      return p1 + val;
+    });
+  }
+
+  // Handle trailing commas
+  jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
 
   try {
     const parsed = JSON.parse(jsonString);

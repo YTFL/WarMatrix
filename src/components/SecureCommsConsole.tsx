@@ -20,7 +20,7 @@ import { strategicCommandChat, StrategicChatOutput } from '@/ai/flows/strategic-
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type MessageSource =
+export type MessageSource =
     | 'COMMAND_INPUT'
     | 'AI_STRATEGIST'
     | 'SIMULATION_ENGINE'
@@ -28,7 +28,7 @@ type MessageSource =
     | 'FOG_OF_WAR_MODULE'
     | 'SYSTEM';
 
-interface ChatMessage {
+export interface ChatMessage {
     id: string;
     source: MessageSource;
     headline?: string;
@@ -44,11 +44,13 @@ interface Props {
     isOpen: boolean;
     onClose: () => void;
     battlefieldContext?: string;
+    messages: ChatMessage[];
+    onMessagesChange: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function nowTs() {
+export function nowTs() {
     return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
@@ -68,7 +70,7 @@ const classificationColor: Record<string, string> = {
     UNCLASSIFIED: '#4B5563',
 };
 
-const INITIAL_LOG: ChatMessage[] = [
+export const INITIAL_LOG: ChatMessage[] = [
     {
         id: 'sys-1',
         source: 'SYSTEM',
@@ -134,9 +136,7 @@ const ACTIONS: ActionDef[] = [
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sector Alpha-9, Highland terrain. Friendly forces at grid B3 and E5. Enemy forces detected at grid D7 and F2.' }: Props) {
-    const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_LOG);
-    const [historyLog, setHistoryLog] = useState<ChatMessage[]>(INITIAL_LOG);
+export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sector Alpha-9, Highland terrain. Friendly forces at grid B3 and E5. Enemy forces detected at grid D7 and F2.', messages, onMessagesChange }: Props) {
     const [inputValue, setInputValue] = useState('');
     const [loading, setLoading] = useState(false);
     const [aiServerOnline, setAiServerOnline] = useState<boolean | null>(null); // null = checking
@@ -167,8 +167,7 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
             timestamp: nowTs(),
         };
 
-        setMessages((prev) => [...prev, userMsg]);
-        setHistoryLog((prev) => [...prev, userMsg]);
+        onMessagesChange((prev) => [...prev, userMsg]);
         setInputValue('');
         setLoading(true);
 
@@ -258,8 +257,7 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                 }
             }
 
-            setMessages((prev) => [...prev, aiMsg!]);
-            setHistoryLog((prev) => [...prev, aiMsg!]);
+            onMessagesChange((prev) => [...prev, aiMsg!]);
         } catch (err) {
             const errMsg: ChatMessage = {
                 id: `err-${Date.now()}`,
@@ -267,8 +265,7 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                 body: 'UPLINK FAILURE — All AI channels timed out. Check server status.',
                 timestamp: nowTs(),
             };
-            setMessages((prev) => [...prev, errMsg]);
-            setHistoryLog((prev) => [...prev, errMsg]);
+            onMessagesChange((prev) => [...prev, errMsg]);
         } finally {
             setLoading(false);
         }
@@ -340,7 +337,7 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                             <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#1F6FEB]/70">Conversation Log</span>
                         </div>
                         <div className="flex-1 overflow-y-auto scrollbar-hide p-2 flex flex-col gap-1">
-                            {historyLog.map((msg) => {
+                            {messages.map((msg) => {
                                 const style = sourceStyle[msg.source];
                                 return (
                                     <div

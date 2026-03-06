@@ -12,9 +12,11 @@ interface HeaderProps {
   turn: number;
   status: 'ACTIVE' | 'AWAITING COMMAND' | 'PROCESSING';
   onOpenBuilder: () => void;
+  role?: 'BLUE_TEAM' | 'RED_TEAM';
+  onRoleSwitch?: (role: 'BLUE_TEAM' | 'RED_TEAM') => void;
 }
 
-export function Header({ turn, status, onOpenBuilder }: HeaderProps) {
+export function Header({ turn, status, onOpenBuilder, role, onRoleSwitch }: HeaderProps) {
   return (
     <header className="h-14 border-b border-[#1F6FEB]/20 bg-[#0F1115] flex items-center justify-between px-6 shrink-0 z-50 shadow-2xl">
       <div className="flex items-center gap-6">
@@ -26,7 +28,23 @@ export function Header({ turn, status, onOpenBuilder }: HeaderProps) {
             </h1>
           </div>
         </div>
-
+        {role && (
+          <div className="flex items-center gap-2">
+            <div className={`px-2 py-0.5 rounded-sm border text-[9px] font-bold uppercase tracking-wider ${role === 'BLUE_TEAM' ? 'bg-[#1F6FEB]/10 border-[#1F6FEB]/30 text-[#1F6FEB]' : 'bg-[#EF4444]/10 border-[#EF4444]/30 text-[#EF4444]'}`}>
+              {role === 'BLUE_TEAM' ? 'Friendly Forces' : 'Hostile Perspective'}
+            </div>
+            {onRoleSwitch && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onRoleSwitch(role === 'BLUE_TEAM' ? 'RED_TEAM' : 'BLUE_TEAM')}
+                className="h-6 px-1.5 text-[7px] font-mono text-[#4B5563] hover:text-[#E6EDF3] uppercase"
+              >
+                Switch
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-8">
