@@ -98,7 +98,7 @@ def rollout(state, depth: int = 6) -> float:
     player_turn = True
     for _ in range(depth):
         if player_turn:
-            # random player action
+            # random player action (uses the global random module; seed set in run_mcts)
             action = random.choice(ACTIONS)
             sim_state = apply_action(sim_state, action)
         else:
@@ -120,11 +120,16 @@ def backpropagate(node: Node, reward: float):
         node = node.parent
 
 
-def run_mcts(root_state, iterations: int = 400) -> Optional[str]:
+def run_mcts(root_state, iterations: int = 400, seed: int = None) -> Optional[str]:
     """Run adversarial MCTS starting from root_state (player to move by default).
 
     Returns the best player action (string) chosen among root children.
     """
+    # Seed global RNGs for deterministic behavior when seed provided
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+
     root = Node(root_state, parent=None, action=None, player_turn=True)
 
     for _ in range(iterations):
