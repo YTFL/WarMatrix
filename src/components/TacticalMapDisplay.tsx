@@ -192,16 +192,31 @@ export function TacticalMapDisplay({
 }: TacticalMapDisplayProps) {
     const tc: TC = TERRAIN_CONFIG[terrainType as TerrainKey] ?? TERRAIN_CONFIG.Highland;
 
-    // ── Stepped zoom levels: 70% → 120% in 10% increments ──────────────────────
-    const ZOOM_LEVELS = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2] as const;
+    // ── Stepped zoom levels: -300% to +300% ──────────────────────────────────
+    // -300%, -200%, -100%, 0% (Default), +100%, +200%, +300%
+    // Mapped to scale factors: 0.25, 0.33, 0.5, 1.0, 2.0, 3.0, 4.0
+    const ZOOM_STAGES = [0.25, 0.33, 0.5, 1.0, 2.0, 3.0, 4.0] as const;
     const DEFAULT_ZOOM = 1.0;
-    const ZOOM_STEP = 0.1;
 
-    const snapToZoomLevel = (raw: number): number => {
-        // Clamp to valid range
-        const clamped = Math.max(ZOOM_LEVELS[0], Math.min(ZOOM_LEVELS[ZOOM_LEVELS.length - 1], raw));
-        // Snap to nearest 10% step
-        return Math.round(clamped * 10) / 10;
+    const snapToZoomLevel = (raw: number, direction: 'in' | 'out'): number => {
+        const currentIndex = ZOOM_STAGES.indexOf(raw as any);
+        if (currentIndex === -1) return DEFAULT_ZOOM;
+
+        if (direction === 'in') {
+            return ZOOM_STAGES[Math.min(ZOOM_STAGES.length - 1, currentIndex + 1)];
+        } else {
+            return ZOOM_STAGES[Math.max(0, currentIndex - 1)];
+        }
+    };
+
+    const getZoomPercentageLabel = (z: number): string => {
+        if (z === 1.0) return '0%';
+        if (z > 1.0) return `+${Math.round((z - 1) * 100)}%`;
+        // For values < 1, we use the inverse mapping for labels: 0.5 -> -100%, 0.33 -> -200%, 0.25 -> -300%
+        if (z === 0.5) return '-100%';
+        if (z === 0.33) return '-200%';
+        if (z === 0.25) return '-300%';
+        return `${Math.round((z - 1) * 100)}%`;
     };
 
     // Pan & Zoom State
@@ -219,11 +234,11 @@ export function TacticalMapDisplay({
 
     // Zoom helpers
     const handleZoomIn = useCallback(() => {
-        setZoom(prev => snapToZoomLevel(prev + ZOOM_STEP));
+        setZoom(prev => snapToZoomLevel(prev, 'in'));
     }, []);
 
     const handleZoomOut = useCallback(() => {
-        setZoom(prev => snapToZoomLevel(prev - ZOOM_STEP));
+        setZoom(prev => snapToZoomLevel(prev, 'out'));
     }, []);
 
     // Reset: ONLY restores the zoom level to exactly 100% (DEFAULT_ZOOM).
@@ -239,7 +254,7 @@ export function TacticalMapDisplay({
 
         const handleNativeWheel = (e: WheelEvent) => {
             e.preventDefault();
-            setZoom(prev => snapToZoomLevel(e.deltaY < 0 ? prev + ZOOM_STEP : prev - ZOOM_STEP));
+            setZoom(prev => snapToZoomLevel(prev, e.deltaY < 0 ? 'in' : 'out'));
         };
 
         svg.addEventListener('wheel', handleNativeWheel, { passive: false });
@@ -513,16 +528,16 @@ export function TacticalMapDisplay({
                 {/* Zoom In */}
                 <button
                     onClick={handleZoomIn}
-                    disabled={zoom >= 1.2}
+                    disabled={zoom >= ZOOM_STAGES[ZOOM_STAGES.length - 1]}
                     title="Zoom In"
                     className="flex items-center justify-center w-7 h-7 transition-all"
                     style={{
-                        color: zoom >= 1.2 ? 'rgba(31,111,235,0.25)' : '#3A8DFF',
+                        color: zoom >= ZOOM_STAGES[ZOOM_STAGES.length - 1] ? 'rgba(31,111,235,0.25)' : '#3A8DFF',
                         borderBottom: '1px solid rgba(31,111,235,0.18)',
-                        cursor: zoom >= 1.2 ? 'default' : 'pointer',
+                        cursor: zoom >= ZOOM_STAGES[ZOOM_STAGES.length - 1] ? 'default' : 'pointer',
                     }}
                     onMouseEnter={(e) => {
-                        if (zoom < 1.2) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(31,111,235,0.15)';
+                        if (zoom < ZOOM_STAGES[ZOOM_STAGES.length - 1]) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(31,111,235,0.15)';
                     }}
                     onMouseLeave={(e) => {
                         (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
@@ -537,23 +552,23 @@ export function TacticalMapDisplay({
                     style={{ borderBottom: '1px solid rgba(31,111,235,0.18)' }}
                 >
                     <span className="text-[7px] font-mono font-bold select-none" style={{ color: '#C9D3E0' }}>
-                        {Math.round(zoom * 100)}%
+                        {getZoomPercentageLabel(zoom)}
                     </span>
                 </div>
 
                 {/* Zoom Out */}
                 <button
                     onClick={handleZoomOut}
-                    disabled={zoom <= 0.7}
+                    disabled={zoom <= ZOOM_STAGES[0]}
                     title="Zoom Out"
                     className="flex items-center justify-center w-7 h-7 transition-all"
                     style={{
-                        color: zoom <= 0.7 ? 'rgba(31,111,235,0.25)' : '#3A8DFF',
+                        color: zoom <= ZOOM_STAGES[0] ? 'rgba(31,111,235,0.25)' : '#3A8DFF',
                         borderBottom: '1px solid rgba(31,111,235,0.18)',
-                        cursor: zoom <= 0.7 ? 'default' : 'pointer',
+                        cursor: zoom <= ZOOM_STAGES[0] ? 'default' : 'pointer',
                     }}
                     onMouseEnter={(e) => {
-                        if (zoom > 0.7) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(31,111,235,0.15)';
+                        if (zoom > ZOOM_STAGES[0]) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(31,111,235,0.15)';
                     }}
                     onMouseLeave={(e) => {
                         (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
@@ -562,18 +577,17 @@ export function TacticalMapDisplay({
                     <ZoomOut className="w-3 h-3" />
                 </button>
 
-                {/* Reset Zoom — resets ONLY the zoom level to 100%, preserves pan/units/orientation */}
+                {/* Reset Zoom — resets ONLY the zoom level to 0% (100% scale), preserves pan/units/orientation */}
                 <button
                     onClick={handleZoomReset}
-                    disabled={zoom === DEFAULT_ZOOM}
-                    title="Reset Zoom to 100%"
+                    title="Reset Zoom to 0%"
                     className="flex items-center justify-center w-7 h-7 transition-all"
                     style={{
-                        color: zoom === DEFAULT_ZOOM ? 'rgba(31,111,235,0.25)' : '#3A8DFF',
-                        cursor: zoom === DEFAULT_ZOOM ? 'default' : 'pointer',
+                        color: '#3A8DFF',
+                        cursor: 'pointer',
                     }}
                     onMouseEnter={(e) => {
-                        if (zoom !== DEFAULT_ZOOM) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(31,111,235,0.15)';
+                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(31,111,235,0.15)';
                     }}
                     onMouseLeave={(e) => {
                         (e.currentTarget as HTMLButtonElement).style.background = 'transparent';

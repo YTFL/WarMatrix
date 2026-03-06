@@ -337,7 +337,7 @@ export default function WarMatrixPage() {
 
       <main className="flex-1 p-4 flex gap-4 overflow-hidden">
         {/* LEFT ZONE: Intel Widgets */}
-        <div className="w-64 flex flex-col gap-4 shrink-0 h-full overflow-hidden pr-1">
+        <div className="w-64 flex flex-col gap-4 shrink-0 h-full overflow-y-auto custom-scrollbar pr-2">
           {/* Sidebar Accordion with all 5 modules */}
           <SidebarAccordion
             activeScenario={activeScenario}
@@ -361,18 +361,17 @@ export default function WarMatrixPage() {
 
 
           {/* Active Scenario — clickable briefing panel */}
-          <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex flex-col min-h-0">
             {activeScenario ? (
               <button
                 onClick={() => setIsBriefingModalOpen(true)}
-                className="w-full text-left group flex-1 flex flex-col"
+                className="w-full text-left group flex flex-col"
                 style={{
                   background: 'rgba(8,14,28,0.85)',
                   border: '1px solid rgba(31,111,235,0.22)',
                   borderRadius: '2px',
                   padding: '10px 12px',
                   transition: 'border-color 0.2s, box-shadow 0.2s',
-                  minHeight: '120px',
                 }}
                 onMouseEnter={(e) => {
                   const el = e.currentTarget as HTMLButtonElement;
@@ -391,7 +390,7 @@ export default function WarMatrixPage() {
                   <span className="ml-auto text-[7px] font-mono text-[#1F6FEB]/50 group-hover:text-[#3A8DFF] transition-colors uppercase tracking-wider">View Briefing ›</span>
                 </div>
                 <span className="text-[10px] font-bold text-[#E6EDF3] leading-tight block mb-1 truncate shrink-0">{activeScenario.title}</span>
-                <p className="text-[8px] font-mono text-[#6B7280] leading-snug line-clamp-4 flex-1">{activeScenario.briefing}</p>
+                <p className="text-[8px] font-mono text-[#6B7280] leading-snug">{activeScenario.briefing}</p>
                 <div className="flex items-center gap-2 mt-auto pt-2 shrink-0">
                   <span className="text-[7px] font-mono text-[#8B5CF6] uppercase">{activeScenario.terrainType}</span>
                   <span className="text-[7px] font-mono text-[#4B5563]">·</span>
@@ -400,16 +399,48 @@ export default function WarMatrixPage() {
               </button>
             ) : (
               <div
-                className="w-full flex-1 flex flex-col items-center justify-center p-4 text-center border border-[#1F6FEB]/10 rounded-sm bg-[#080E1C]/40"
+                className="w-full flex flex-col items-center justify-center p-4 text-center border border-[#1F6FEB]/10 rounded-sm bg-[#080E1C]/40"
               >
                 <div className="w-8 h-8 rounded-full border border-[#1F6FEB]/20 flex items-center justify-center mb-3">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#374151]" />
                 </div>
-                <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#4B5563] mb-1">No Active Scenario</span>
+                <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#4B6A83] mb-1">No Active Scenario</span>
                 <p className="text-[7px] font-mono text-[#374151] leading-tight">Awaiting initial tactical deployment</p>
               </div>
             )}
           </div>
+
+          <TacticalWidget title="Ally Damage Report" icon={Zap}>
+            <div className="flex flex-col gap-1">
+              {[
+                { label: 'Units Lost', value: '3' },
+                { label: 'Infantry Casualties', value: '5' },
+                { label: 'Armor Damaged', value: '2' },
+                { label: 'Support Units Lost', value: '1' },
+              ].map((item, i) => (
+                <div key={i} className="flex justify-between items-center py-0.5 border-b border-[#1F6FEB]/05 last:border-0">
+                  <span className="text-[9px] text-[#9CA3AF] uppercase font-bold tracking-tighter">{item.label}</span>
+                  <span className="text-[10px] font-mono text-[#E6EDF3]">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </TacticalWidget>
+
+          <TacticalWidget title="Enemy Damage Report" icon={Activity}>
+            <div className="flex flex-col gap-1">
+              {[
+                { label: 'Enemy Units Destroyed', value: '8' },
+                { label: 'Enemy Units Captured', value: '2' },
+                { label: 'Enemy Armor Destroyed', value: '3' },
+                { label: 'Enemy Support Units Neutralized', value: '1' },
+              ].map((item, i) => (
+                <div key={i} className="flex justify-between items-center py-0.5 border-b border-[#1F6FEB]/05 last:border-0">
+                  <span className="text-[9px] text-[#9CA3AF] uppercase font-bold tracking-tighter">{item.label}</span>
+                  <span className="text-[10px] font-mono text-[#E6EDF3]">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </TacticalWidget>
         </div>
 
         {/* ── MISSION BRIEFING MODAL ── */}

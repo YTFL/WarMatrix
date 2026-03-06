@@ -375,8 +375,8 @@ export function SidebarAccordion({
                 icon={Crosshair}
                 activeId={activeId}
                 onToggle={handleToggle}
-                statusDot={activeScenario ? (enemy > 5 ? 'red' : 'amber') : 'gray'}
-                overrideIconColor="#F59E0B"
+                statusDot={activeScenario ? 'red' : 'gray'}
+                overrideIconColor={activeId === 'intel' ? '#EF4444' : '#4B6A8A'}
             >
                 <div className="flex flex-col gap-0.5">
                     <DataRow
