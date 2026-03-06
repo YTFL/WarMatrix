@@ -4,22 +4,25 @@ import React, { useState, useEffect } from 'react';
 import { Header } from '@/components/Header';
 import { TacticalMap } from '@/components/TacticalMap';
 import { ScenarioBuilder } from '@/components/ScenarioBuilder';
+import { TerrainIntelligencePanel } from '@/components/TerrainIntelligencePanel';
+import { SecureCommsConsole } from '@/components/SecureCommsConsole';
 import { receiveStrategicAnalysis, ReceiveStrategicAnalysisOutput } from '@/ai/flows/receive-strategic-analysis';
 import { useToast } from '@/hooks/use-toast';
 import { TacticalWidget } from '@/components/TacticalWidget';
-import { 
-  Activity, 
-  CloudRain, 
-  Radio, 
-  Boxes, 
-  Zap, 
-  BrainCircuit, 
-  Terminal, 
-  ShieldAlert, 
+import {
+  Activity,
+  CloudRain,
+  Radio,
+  Boxes,
+  Zap,
+  BrainCircuit,
+  Terminal,
+  ShieldAlert,
   MessageSquare,
   Send,
   Cpu,
-  Target
+  Target,
+  Maximize2
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
@@ -39,6 +42,7 @@ export default function WarMatrixPage() {
   const [analysis, setAnalysis] = useState<ReceiveStrategicAnalysisOutput | null>(null);
   const [role, setRole] = useState<'BLUE_TEAM' | 'RED_TEAM'>('BLUE_TEAM');
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+  const [isCommsConsoleOpen, setIsCommsConsoleOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [lastResult, setLastResult] = useState<{
     command: string;
@@ -59,10 +63,10 @@ export default function WarMatrixPage() {
     setLoadingAnalysis(true);
     try {
       const summary = `
-        Turn ${turn}. Viewpoint: ${role}. 
+        Turn ${turn}. Viewpoint: ${role}.
         Units breakdown: ${units.map(u => `${u.label} (${u.type}) at [${u.x},${u.y}]`).join(', ')}.
       `;
-      const result = await receiveStrategicAnalysis({ 
+      const result = await receiveStrategicAnalysis({
         battlefieldSummary: summary,
         missionObjectives: "Secure Objective Sierra and neutralize enemy threats in Sector Alpha-9."
       });
@@ -90,12 +94,12 @@ export default function WarMatrixPage() {
     const command = inputValue.trim();
     setInputValue('');
     setStatus('PROCESSING');
-    
+
     setTimeout(() => {
       setTurn(prev => prev + 1);
       const success = Math.floor(Math.random() * 40) + 50;
       const risk = Math.floor(Math.random() * 30) + 10;
-      
+
       setUnits(prev => prev.map(u => ({
         ...u,
         x: Math.max(1, Math.min(11, u.x + (Math.random() > 0.8 ? 1 : Math.random() < 0.2 ? -1 : 0))),
@@ -121,14 +125,14 @@ export default function WarMatrixPage() {
 
   return (
     <div className="flex flex-col h-screen select-none bg-[#0A0A0A] overflow-hidden">
-      <Header 
-        turn={turn} 
-        status={status} 
-        role={role} 
-        onRoleSwitch={setRole} 
+      <Header
+        turn={turn}
+        status={status}
+        role={role}
+        onRoleSwitch={setRole}
         onOpenBuilder={() => setIsBuilderOpen(true)}
       />
-      
+
       <main className="flex-1 p-4 flex gap-4 overflow-hidden">
         {/* LEFT ZONE: Intel Widgets */}
         <div className="w-64 flex flex-col gap-4 shrink-0 overflow-y-auto pr-1 scrollbar-hide">
@@ -180,11 +184,12 @@ export default function WarMatrixPage() {
           <div className="flex-1 flex gap-4 overflow-hidden">
             <div className="flex-1 relative">
               <TacticalMap units={visibleUnits} />
+              <TerrainIntelligencePanel />
             </div>
-            
+
             <div className="w-80 flex flex-col shrink-0">
-              <TacticalWidget 
-                title="AI Strategic Analysis" 
+              <TacticalWidget
+                title="AI Strategic Analysis"
                 icon={BrainCircuit}
                 headerAction={loadingAnalysis && <div className="w-2 h-2 rounded-full bg-[#F59E0B] animate-ping" />}
               >
@@ -229,7 +234,20 @@ export default function WarMatrixPage() {
               </div>
             </TacticalWidget>
 
-            <TacticalWidget title="Secure Comms" icon={MessageSquare} className="flex-1">
+            <TacticalWidget
+              title="Secure Comms"
+              icon={MessageSquare}
+              className="flex-1"
+              headerAction={
+                <button
+                  onClick={() => setIsCommsConsoleOpen(true)}
+                  className="w-5 h-5 flex items-center justify-center rounded-sm border border-[#1F6FEB]/20 text-[#1F6FEB]/50 hover:text-[#3A8DFF] hover:border-[#1F6FEB]/50 transition-all"
+                  title="Open Strategic Ops Console"
+                >
+                  <Maximize2 className="w-2.5 h-2.5" />
+                </button>
+              }
+            >
               <form onSubmit={handleExecuteCommand} className="flex-1 flex flex-col gap-3">
                 <div className="flex-1 bg-[#0A0A0A]/50 border border-[#1F6FEB]/10 rounded-sm p-2 overflow-hidden flex flex-col">
                   <span className="text-[9px] font-mono text-[#4B5563] mb-1">LAST_MSG: {lastResult ? 'CMD_ACK' : 'WAITING_INPUT'}</span>
@@ -281,11 +299,17 @@ export default function WarMatrixPage() {
         </div>
       </main>
 
-      <ScenarioBuilder 
-        units={units} 
-        onUpdateUnits={setUnits} 
-        isOpen={isBuilderOpen} 
-        onClose={() => setIsBuilderOpen(false)} 
+      <ScenarioBuilder
+        units={units}
+        onUpdateUnits={setUnits}
+        isOpen={isBuilderOpen}
+        onClose={() => setIsBuilderOpen(false)}
+      />
+
+      <SecureCommsConsole
+        isOpen={isCommsConsoleOpen}
+        onClose={() => setIsCommsConsoleOpen(false)}
+        battlefieldContext={`Turn ${turn}. Role: ${role}. ${units.map(u => `${u.label} (${u.type}) at [${u.x},${u.y}]`).join(', ')}.`}
       />
 
       <div className="fixed inset-0 pointer-events-none z-[60] opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
