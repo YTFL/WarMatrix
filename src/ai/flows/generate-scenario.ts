@@ -1,6 +1,10 @@
-'use server';
-
-import { z } from 'genkit';
+import { z } from 'zod';
+import {
+    TacticalTerrainMapData,
+    TacticalTeam,
+    TerrainCellType,
+    buildTerrainGridFromPeaks,
+} from '@/lib/tacticalTerrain';
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 
@@ -39,6 +43,23 @@ const MapPeakSchema = z.object({
     r2: z.number(),
 });
 
+const TerrainCellSchema = z.enum(['plain', 'forest', 'hill', 'mountain', 'river', 'road', 'urban']);
+
+const TerrainMapUnitSchema = z.object({
+    id: z.string(),
+    type: z.string(),
+    team: z.enum(['ally', 'enemy', 'objective', 'neutral']),
+    x: z.number().int().min(1),
+    y: z.number().int().min(1),
+    label: z.string().optional(),
+});
+
+const TerrainMapDataSchema = z.object({
+    map_size: z.tuple([z.number().int().min(1), z.number().int().min(1)]),
+    terrain: z.array(z.array(TerrainCellSchema)).min(1),
+    units: z.array(TerrainMapUnitSchema),
+});
+
 const GenerateScenarioOutputSchema = z.object({
     scenarioTitle: z.string().describe('Short operational scenario title, e.g. "Operation Iron Ridge".'),
     briefing: z
@@ -50,6 +71,7 @@ const GenerateScenarioOutputSchema = z.object({
         .max(20)
         .describe('Between 4 and 20 deployed entities covering a mix of friendly, hostile, objective, and support assets.'),
     mapPeaks: z.array(MapPeakSchema).optional(),
+    terrainMapData: TerrainMapDataSchema.optional(),
 });
 export type GenerateScenarioOutput = z.infer<typeof GenerateScenarioOutputSchema>;
 
@@ -58,6 +80,92 @@ export type GenerateScenarioOutput = z.infer<typeof GenerateScenarioOutputSchema
 export async function generateScenario(
     input: GenerateScenarioInput
 ): Promise<GenerateScenarioOutput> {
+
+    const toTerrainCell = (raw: unknown): TerrainCellType => {
+        const v = String(raw ?? '').toLowerCase().trim();
+        if (v === 'plain' || v === 'plains') return 'plain';
+        if (v === 'forest' || v === 'woods') return 'forest';
+        if (v === 'hill' || v === 'hills') return 'hill';
+        if (v === 'mountain' || v === 'mountains') return 'mountain';
+        if (v === 'river' || v === 'water') return 'river';
+        if (v === 'road') return 'road';
+        if (v === 'urban' || v === 'city') return 'urban';
+        return 'plain';
+    };
+
+    const toTeam = (role: unknown): TacticalTeam => {
+        const r = String(role ?? '').toUpperCase();
+        if (r.includes('FRIEND') || r.includes('ALLY') || r.includes('BLUE')) return 'ally';
+        if (r.includes('ENEMY') || r.includes('HOSTILE') || r.includes('RED')) return 'enemy';
+        if (r.includes('OBJECTIVE')) return 'objective';
+        return 'neutral';
+    };
+
+    const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+
+    const toTerrainMapData = (
+        terrainGrid: TerrainCellType[][],
+        units: Array<z.infer<typeof DeployedUnitSchema>>,
+    ): TacticalTerrainMapData => {
+        const height = Math.max(1, terrainGrid.length);
+        const width = Math.max(1, terrainGrid[0]?.length ?? 44);
+
+        return {
+            map_size: [width, height],
+            terrain: terrainGrid,
+            units: units.map((u, idx) => ({
+                id: `u${idx + 1}`,
+                type: u.assetClass,
+                team: toTeam(u.allianceRole),
+                x: clamp(u.x, 1, width),
+                y: clamp(u.y, 1, height),
+                label: u.label,
+            })),
+        };
+    };
+
+    const normalizeTerrainGrid = (
+        candidate: unknown,
+        width: number,
+        height: number,
+    ): TerrainCellType[][] | null => {
+        if (!Array.isArray(candidate)) return null;
+        if (!Array.isArray(candidate[0])) return null;
+
+        const sourceRows = candidate as unknown[];
+        const sourceHeight = sourceRows.length;
+        if (sourceHeight < 1) return null;
+
+        const firstRow = sourceRows.find((row) => Array.isArray(row)) as unknown[] | undefined;
+        const sourceWidth = firstRow?.length ?? 0;
+        if (sourceWidth < 1) return null;
+
+        const grid: TerrainCellType[][] = Array.from({ length: height }, (_, y) =>
+            Array.from({ length: width }, (_, x) => {
+                // Resample source grid into target dimensions so small AI outputs
+                // still populate the entire tactical map instead of defaulting to plain.
+                const sy = Math.max(0, Math.min(sourceHeight - 1, Math.round((y / Math.max(1, height - 1)) * (sourceHeight - 1))));
+                const sx = Math.max(0, Math.min(sourceWidth - 1, Math.round((x / Math.max(1, width - 1)) * (sourceWidth - 1))));
+                const row = sourceRows[sy] as unknown[] | undefined;
+                const rawCell = row?.[sx];
+                return toTerrainCell(rawCell);
+            }),
+        );
+        return grid;
+    };
+
+    const hasTerrainVariation = (grid: TerrainCellType[][]): boolean => {
+        const kinds = new Set<TerrainCellType>();
+        for (const row of grid) {
+            for (const cell of row) {
+                kinds.add(cell);
+                if (kinds.size >= 2) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
 
     const toRole = (raw?: string): 'FRIENDLY' | 'ENEMY' | 'NEUTRAL' | 'INFRASTRUCTURE' => {
         const r = String(raw || '').toUpperCase();
@@ -79,8 +187,6 @@ export async function generateScenario(
         if (v.includes('objective') || v.includes('outpost')) return 'Objective';
         return 'Infantry';
     };
-
-    const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
     const seedFrom = (key: string) => {
         let s = 2166136261;
@@ -155,6 +261,8 @@ export async function generateScenario(
             h: Number((0.6 + rng() * 0.8).toFixed(2)),
             r2: (rng() * 44 * 0.25 + 44 * 0.05) ** 2,
         }));
+        const terrainGrid = buildTerrainGridFromPeaks(44, 28, input.terrainType, mapPeaks);
+        const terrainMapData = toTerrainMapData(terrainGrid, units);
 
         const titleByTerrain: Record<GenerateScenarioInput['terrainType'], string> = {
             Highland: 'Ridge',
@@ -169,11 +277,15 @@ export async function generateScenario(
             briefing: `${input.missionContext} Forces are deployed for ${input.objectiveType.toLowerCase()} under ${input.terrainType.toLowerCase()} conditions.`,
             units,
             mapPeaks,
+            terrainMapData,
         });
     };
 
     const instruction = `OUTPUT STRICTLY VALID JSON DICTIONARY ONLY. NO EXPLANATIONS. NO MARKDOWN.
-Generate a tactical scenario as a highly compressed JSON dictionary containing "u" (units array, max 4) and "p" (terrain peaks array, EXACTLY 3).
+Generate a tactical scenario as a highly compressed JSON dictionary containing:
+- "u" (units array, max 4)
+- "p" (terrain peaks array, EXACTLY 3)
+- "m" (terrain map object)
 
 FORMAT KEY FOR "u" (4 UNITS):
 "l" = label (String, short military unit name)
@@ -187,8 +299,13 @@ FORMAT KEY FOR "p" (3 TERRAIN PEAKS - Determines Map Topography):
 "y" = 1 to 28
 "h" = Peak Height (Float 0.5 to 1.5)
 
+FORMAT KEY FOR "m" (terrain map source-of-truth):
+"s" = [44,28]
+"t" = 2D terrain grid [28 rows][44 cols] where each cell is one of:
+plain | forest | hill | mountain | river | road | urban
+
 EXAMPLE OUPUT (NO MARKDOWN TICK BLOCKS, RAW DICT ONLY):
-{"u":[{"l":"Bravo Armor","c":"Armor","r":"FRIENDLY","x":12,"y":14},{"l":"Outpost","c":"Objective","r":"NEUTRAL","x":36,"y":20}],"p":[{"x":22,"y":12,"h":1.2},{"x":10,"y":20,"h":0.8}]}
+{"u":[{"l":"Bravo Armor","c":"Armor","r":"FRIENDLY","x":12,"y":14},{"l":"Outpost","c":"Objective","r":"NEUTRAL","x":36,"y":20}],"p":[{"x":22,"y":12,"h":1.2},{"x":10,"y":20,"h":0.8},{"x":33,"y":18,"h":1.1}],"m":{"s":[44,28],"t":[["plain","forest"],["river","hill"]]}}
 `;
 
     const battlefield_data = `MISSION: ${input.missionContext}
@@ -325,6 +442,21 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
             r2: (Math.random() * 44 * 0.25 + 44 * 0.05) ** 2,
         }));
 
+        const mapObj = parsedObj.m ?? parsedObj.map ?? parsedObj.terrainMapData;
+        const parsedSize = Array.isArray(mapObj?.s)
+            ? mapObj.s
+            : Array.isArray(mapObj?.map_size)
+                ? mapObj.map_size
+                : [44, 28];
+        const mapWidth = clamp(Number(parsedSize[0]) || 44, 1, 100);
+        const mapHeight = clamp(Number(parsedSize[1]) || 28, 1, 100);
+
+        const directTerrainGrid = normalizeTerrainGrid(
+            mapObj?.t ?? mapObj?.terrain,
+            mapWidth,
+            mapHeight,
+        );
+
         // Procedurally inflate unit count up to 10-12 minimum
         const requiredExtras = Math.max(0, 10 - units.length);
         const roles = ['FRIENDLY', 'ENEMY', 'NEUTRAL'];
@@ -356,12 +488,19 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
         const scenarioTitle = `Operation ${adjs[Math.floor(Math.random() * adjs.length)]} ${nouns[input.terrainType] || 'Storm'}`;
         const briefing = `${input.missionContext} Tactical deployment required to achieve ${input.objectiveType.toLowerCase()}.`;
 
+        const fallbackTerrainGrid = buildTerrainGridFromPeaks(mapWidth, mapHeight, input.terrainType, mapPeaks);
+        const terrainGrid = directTerrainGrid && hasTerrainVariation(directTerrainGrid)
+            ? directTerrainGrid
+            : fallbackTerrainGrid;
+        const terrainMapData = toTerrainMapData(terrainGrid, units);
+
         // Validate with the Zod schema
         return GenerateScenarioOutputSchema.parse({
             scenarioTitle,
             briefing,
             units,
-            mapPeaks
+            mapPeaks,
+            terrainMapData,
         });
     } catch (e: any) {
         console.error("Failed to parse JSON from local model:", text, e);

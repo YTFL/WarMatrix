@@ -1,7 +1,15 @@
 'use client';
 
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { RotateCcw, ZoomIn, ZoomOut, Square } from 'lucide-react';
+import { TacticalTerrainMapData } from '@/lib/tacticalTerrain';
+import { TerrainPeak, TACTICAL_CONTOUR_LEVELS, buildProceduralHeightmap } from '@/lib/proceduralTerrainHeightmap';
+
+const TacticalMap3D = dynamic(
+    () => import('@/components/TacticalMap3D').then((mod) => mod.TacticalMap3D),
+    { ssr: false },
+);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +51,8 @@ interface TacticalMapDisplayProps {
     unitHpById?: Record<string, { hp: number; maxHp: number }>;
     objectiveProgressById?: Record<string, { friendly: number; enemy: number; controller: 'FRIENDLY' | 'ENEMY' | 'NEUTRAL' }>;
     onEndSimulation?: () => void;
+    terrainMapData?: TacticalTerrainMapData;
+    terrainVersionKey?: string;
 }
 
 // ─── Terrain palettes ─────────────────────────────────────────────────────────
@@ -73,84 +83,6 @@ const TERRAIN_CONFIG = {
 
 type TerrainKey = keyof typeof TERRAIN_CONFIG;
 type TC = typeof TERRAIN_CONFIG[TerrainKey];
-
-// ─── Deterministic PRNG ────────────────────────────────────────────────────────
-
-function seededRng(seed: number) {
-    let s = Math.abs(seed) | 0;
-    return () => {
-        s = (Math.imul(1664525, s) + 1013904223) | 0;
-        return (s >>> 0) / 0x100000000;
-    };
-}
-
-// ─── Heightmap — Gaussian sum-of-peaks ────────────────────────────────────────
-
-function buildHeightmap(
-    terrain: string,
-    cols: number,
-    rows: number,
-    seedString: string,
-    mapPeaks?: { cx: number; cy: number; h: number; r2: number }[]
-): Float32Array {
-    const N = (cols + 1) * (rows + 1);
-    const map = new Float32Array(N);
-    const idx = (r: number, c: number) => r * (cols + 1) + c;
-    const combinedSeed = terrain + seedString;
-    const rng = seededRng(
-        combinedSeed.split('').reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 17)
-    );
-
-    const peaks: { cx: number; cy: number; h: number; r2: number }[] = [];
-
-    if (mapPeaks && mapPeaks.length > 0) {
-        // Use AI dictated peaks, but boost their radius and height for structural impact
-        mapPeaks.forEach(p => {
-            peaks.push({ ...p, h: p.h * 1.5, r2: p.r2 * 1.5 });
-        });
-        // Add a few procedural background hills for texture
-        for (let i = 0; i < 12; i++) {
-            peaks.push({
-                cx: rng() * cols, cy: rng() * rows,
-                h: rng() * 0.35 + 0.1, r2: (rng() * cols * 0.15 + cols * 0.05) ** 2,
-            });
-        }
-    } else {
-        // Procedural map generation
-        const numPeaks = terrain === 'Plains' ? 12 : terrain === 'Urban' ? 32 : 24;
-        for (let i = 0; i < numPeaks; i++) {
-            peaks.push({
-                cx: rng() * cols, cy: rng() * rows,
-                h: rng() * 0.45 + 0.25, r2: (rng() * cols * 0.25 + cols * 0.05) ** 2,
-            });
-        }
-    }
-
-    let maxH = 0;
-    for (let r = 0; r <= rows; r++) {
-        for (let c = 0; c <= cols; c++) {
-            let h = 0;
-            for (const p of peaks) {
-                const dx = c - p.cx;
-                const dy = r - p.cy;
-                h += p.h * Math.exp(-(dx * dx + dy * dy) / p.r2);
-            }
-            map[idx(r, c)] = h;
-            if (h > maxH) maxH = h;
-        }
-    }
-
-    const scale = maxH > 0 ? 1 / maxH : 1;
-    for (let i = 0; i < N; i++) {
-        let h = map[i] * scale;
-        h += (rng() - 0.5) * 0.06; // micro noise
-        map[i] = Math.max(0, Math.min(1, h));
-    }
-
-    return map;
-
-    // expose the idx helper via closure isn't needed externally — it's inlined
-}
 
 // ─── Marching-squares contour segments ────────────────────────────────────────
 
@@ -214,8 +146,19 @@ export function TacticalMapDisplay({
     unitHpById,
     objectiveProgressById,
     onEndSimulation,
+    terrainMapData,
+    terrainVersionKey,
 }: TacticalMapDisplayProps) {
     const tc: TC = TERRAIN_CONFIG[terrainType as TerrainKey] ?? TERRAIN_CONFIG.Highland;
+    const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
+
+    const toggle3DView = useCallback((nextView: '2D' | '3D') => {
+        setViewMode(nextView);
+    }, []);
+
+    useEffect(() => {
+        setViewMode('2D');
+    }, [terrainVersionKey]);
 
     // ── Stepped zoom levels: -300% to +300% ──────────────────────────────────
     // -300%, -200%, -100%, 0% (Default), +100%, +200%, +300%
@@ -326,9 +269,15 @@ export function TacticalMapDisplay({
     const gridCenterX = PL + mapW / 2;
     const gridCenterY = PT + mapH / 2;
 
-    // Heightmap — recalculate only when terrain or scenario title changes
+    // Heightmap — restore original 2D terrain synthesis behavior.
     const heightmap = useMemo(
-        () => buildHeightmap(terrainType, COLS, ROWS, scenarioTitle ?? 'default_seed', mapPeaks),
+        () => buildProceduralHeightmap(
+            terrainType,
+            COLS,
+            ROWS,
+            scenarioTitle ?? 'default_seed',
+            mapPeaks as TerrainPeak[] | undefined,
+        ),
         [terrainType, scenarioTitle, mapPeaks]
     );
 
@@ -354,7 +303,7 @@ export function TacticalMapDisplay({
     }, [heightmap, tc, cW, cH]);
 
     // Contour lines at 6 levels
-    const contourLevels = [0.20, 0.35, 0.52, 0.68, 0.82, 0.92];
+    const contourLevels = [...TACTICAL_CONTOUR_LEVELS];
     const contourColors = [tc.contour0, tc.contour0, tc.contour1, tc.contour1, tc.contour2, tc.contourPeak];
     const contourWidths = [0.7, 0.9, 1.1, 1.3, 1.8, 2.4];
     const contourGlow = [false, false, false, true, true, true];
@@ -699,8 +648,38 @@ export function TacticalMapDisplay({
                 </div>
             </div>
 
+            {/* ── 2D / 3D Toggle ── */}
+            <div className="absolute bottom-14 right-3 z-30 flex items-center gap-1 rounded-sm p-1"
+                style={{
+                    background: 'rgba(4,10,22,0.85)',
+                    border: '1px solid rgba(31,111,235,0.28)',
+                    backdropFilter: 'blur(6px)',
+                }}
+            >
+                <button
+                    onClick={() => toggle3DView('2D')}
+                    className="px-2.5 py-1 rounded-sm text-[10px] font-mono font-bold uppercase tracking-wider transition-all"
+                    style={{
+                        color: viewMode === '2D' ? '#E6EDF3' : '#7C8CA1',
+                        background: viewMode === '2D' ? 'rgba(31,111,235,0.28)' : 'transparent',
+                    }}
+                >
+                    2D View
+                </button>
+                <button
+                    onClick={() => toggle3DView('3D')}
+                    className="px-2.5 py-1 rounded-sm text-[10px] font-mono font-bold uppercase tracking-wider transition-all"
+                    style={{
+                        color: viewMode === '3D' ? '#E6EDF3' : '#7C8CA1',
+                        background: viewMode === '3D' ? 'rgba(31,111,235,0.28)' : 'transparent',
+                    }}
+                >
+                    3D View
+                </button>
+            </div>
+
             {/* ── Zoom Controls ── */}
-            <div
+            {viewMode === '2D' && (<div
                 className="absolute top-14 right-3 z-30 flex flex-col items-center gap-0 rounded-sm overflow-hidden"
                 style={{
                     background: 'rgba(4,10,22,0.85)',
@@ -778,8 +757,39 @@ export function TacticalMapDisplay({
                 >
                     <RotateCcw className="w-3 h-3" />
                 </button>
+            </div>)}
+
+            <div className={`absolute inset-0 transition-opacity duration-200 ${viewMode === '3D' ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+                {terrainMapData ? (
+                    <TacticalMap3D
+                        mapData={terrainMapData}
+                        terrainVersionKey={terrainVersionKey ?? (scenarioTitle ?? 'default_terrain')}
+                        isActive={viewMode === '3D'}
+                        terrainType={terrainType}
+                        scenarioTitle={scenarioTitle}
+                        mapPeaks={mapPeaks}
+                    />
+                ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-[11px] font-mono uppercase tracking-wider text-[#7C8CA1]">
+                        3D Terrain Unavailable
+                    </div>
+                )}
             </div>
 
+            {viewMode === '3D' && (
+                <div className="absolute bottom-3 left-3 z-20 pointer-events-none px-3 py-2 rounded-sm"
+                    style={{
+                        background: 'rgba(4,10,22,0.74)',
+                        border: '1px solid rgba(31,111,235,0.28)',
+                    }}
+                >
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-[#B8C2D6]">
+                        Orbit: Rotate | Zoom | Pan
+                    </span>
+                </div>
+            )}
+
+            {viewMode === '2D' && (<>
             {/* ── SVG map ── */}
             <svg
                 ref={svgRef}
@@ -1100,6 +1110,7 @@ export function TacticalMapDisplay({
                     </div>
                 </div>
             )}
+            </>)}
         </div>
     );
 }

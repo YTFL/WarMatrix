@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { generateScenario, GenerateScenarioInput, GenerateScenarioOutput } from '@/ai/flows/generate-scenario';
+import type { GenerateScenarioInput, GenerateScenarioOutput } from '@/ai/flows/generate-scenario';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -262,7 +262,34 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
 
     const t0 = Date.now();
     try {
-      const result = await generateScenario(params);
+      const res = await fetch('/api/generate-scenario', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+
+      const raw = await res.text();
+      let payload: any = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          payload?.details ||
+          payload?.error ||
+          raw ||
+          `Scenario API failed (${res.status})`,
+        );
+      }
+
+      if (!payload) {
+        throw new Error('Scenario API returned a non-JSON response.');
+      }
+
+      const result = payload as GenerateScenarioOutput;
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
       pushLog('OK', `Response received in ${elapsed}s`);

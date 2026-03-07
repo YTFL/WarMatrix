@@ -84,8 +84,8 @@ export default function HomePage() {
             ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
 
             // Sweep gradient
-            const sweep = ctx.createConicalGradient
-                ? (ctx as any).createConicalGradient(cx, cy, radarAngle)
+            const sweep = ctx.createConicGradient
+                ? ctx.createConicGradient(radarAngle, cx, cy)
                 : null;
 
             if (!sweep) {

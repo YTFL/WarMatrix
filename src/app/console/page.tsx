@@ -10,6 +10,7 @@ import { SidebarAccordion } from '@/components/SidebarAccordion';
 import { GenerateScenarioOutput } from '@/ai/flows/generate-scenario';
 import { useToast } from '@/hooks/use-toast';
 import { TacticalWidget } from '@/components/TacticalWidget';
+import { TacticalTerrainMapData, TacticalTeam, buildTerrainGridFromPeaks } from '@/lib/tacticalTerrain';
 import {
   Activity,
   CloudRain,
@@ -63,6 +64,7 @@ interface ActiveScenario {
   weather?: WeatherType;
   units: Unit[];
   mapPeaks?: { cx: number; cy: number; h: number; r2: number }[];
+  terrainMapData?: TacticalTerrainMapData;
 }
 
 interface BattlefieldUnit {
@@ -449,6 +451,7 @@ export default function WarMatrixPage() {
           weather,
           units: scenario.units,
           mapPeaks: scenario.mapPeaks ?? [],
+          terrainMapData: scenario.terrainMapData,
         },
       }),
     });
@@ -477,6 +480,7 @@ export default function WarMatrixPage() {
       weather,
       units: displayUnits,
       mapPeaks: scenario.mapPeaks,
+      terrainMapData: scenario.terrainMapData,
     });
     setAnalysis(null);
     setMovementEvents([]);
@@ -757,6 +761,46 @@ export default function WarMatrixPage() {
   const terrainType = activeScenario?.terrainType ?? 'Highland';
   const displayScenarioTitle = activeScenario?.title.split(' //')[0] ?? '';
 
+  const terrainVersionKey = React.useMemo(() => {
+    if (!activeScenario) return 'no-simulation';
+    return `${activeScenario.title}|${activeScenario.terrainType}|${JSON.stringify(activeScenario.terrainMapData?.map_size ?? [])}|${JSON.stringify(activeScenario.mapPeaks ?? [])}`;
+  }, [activeScenario]);
+
+  const tacticalTerrainMapData = React.useMemo<TacticalTerrainMapData | undefined>(() => {
+    if (!activeScenario) return undefined;
+
+    const mapSize: [number, number] = activeScenario.terrainMapData?.map_size ?? [44, 28];
+    const terrain = activeScenario.terrainMapData?.terrain ?? buildTerrainGridFromPeaks(
+      mapSize[0],
+      mapSize[1],
+      activeScenario.terrainType,
+      activeScenario.mapPeaks,
+    );
+
+    const unitData = visibleUnits.map((unit) => {
+      const team: TacticalTeam = unit.type === 'FRIENDLY'
+        ? 'ally'
+        : unit.type === 'ENEMY'
+          ? 'enemy'
+          : 'objective';
+
+      return {
+        id: unit.id,
+        type: unit.assetClass ?? unit.type,
+        team,
+        x: unit.x,
+        y: unit.y,
+        label: unit.label,
+      };
+    });
+
+    return {
+      map_size: mapSize,
+      terrain,
+      units: unitData,
+    };
+  }, [activeScenario, visibleUnits]);
+
   return (
     <div className="flex flex-col h-screen select-none bg-[#0A0A0A] overflow-hidden">
       <Header
@@ -1036,6 +1080,8 @@ export default function WarMatrixPage() {
                 unitHpById={unitHpById}
                 objectiveProgressById={objectiveProgressById}
                 onEndSimulation={handleEndSimulation}
+                terrainMapData={tacticalTerrainMapData}
+                terrainVersionKey={terrainVersionKey}
               />
             ) : centerScenarioMode !== 'default' ? (
               <ScenarioBuilder
