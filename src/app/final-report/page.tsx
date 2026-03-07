@@ -24,47 +24,51 @@ const spaceGrotesk = Space_Grotesk({
 
 export default function FinalMissionReport() {
     const router = useRouter();
-    // --- DYNAMIC DATA PLACEHOLDERS ---
-    // These will be populated by the simulation engine in the future.
-    // For now, they are defined here as empty or default values.
-    const missionStatus = ""; // e.g., "SUCCESS"
-    const simulationTurns = ""; // e.g., "042"
-    const alliedCasualties = ""; // e.g., "7 Units"
-    const infantryLost = "";
-    const armorLost = "";
-    const supportUnitsLost = "";
+    const [reportData, setReportData] = React.useState<any>(null);
 
-    const enemyLosses = ""; // e.g., "11 Units"
-    const unitsDestroyed = "";
-    const unitsCaptured = "";
-    const heavyArmorNeutralized = "";
+    React.useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const data = sessionStorage.getItem('missionReportData');
+            if (data) {
+                try {
+                    setReportData(JSON.parse(data));
+                } catch (e) {
+                    console.error("Failed to parse mission report data", e);
+                }
+            }
+        }
+    }, []);
 
-    const objectivesCaptured = ""; // e.g., "3 / 4"
-    const defensiveObjectivesHeld = "";
+    const missionStatus = reportData?.missionStatus ?? "UNKNOWN";
+    const simulationTurns = reportData?.simulationTurns ?? "000";
+    const alliedCasualties = reportData?.alliedCasualties ?? "0 Units";
+    const infantryLost = reportData?.infantryLost ?? "0";
+    const armorLost = reportData?.armorLost ?? "0";
+    const supportUnitsLost = reportData?.supportUnitsLost ?? "0";
 
-    const enemyPersonnelCaptured = "";
-    const enemyVehiclesCaptured = "";
-    const intelRecovered = "";
+    const enemyLosses = reportData?.enemyLosses ?? "0 Units";
+    const unitsDestroyed = reportData?.unitsDestroyed ?? "0";
+    const unitsCaptured = reportData?.unitsCaptured ?? "0";
+    const heavyArmorNeutralized = reportData?.heavyArmorNeutralized ?? "0";
 
-    const commandScore = ""; // e.g., "87%"
-    const operationalEffectiveness = "";
-    const strategicExecution = "";
-    const riskManagement = "";
+    const objectivesCaptured = reportData?.objectivesCaptured ?? "0 / 0";
+    const defensiveObjectivesHeld = reportData?.defensiveObjectivesHeld ?? "0";
 
-    const alliedVehiclesDamaged = "";
-    const alliedInfantryWounded = "";
-    const enemyArmorDestroyed = "";
-    const enemyArtilleryNeutralized = "";
+    const enemyPersonnelCaptured = reportData?.enemyPersonnelCaptured ?? "0";
+    const enemyVehiclesCaptured = reportData?.enemyVehiclesCaptured ?? "0";
+    const intelRecovered = reportData?.intelRecovered ?? "NONE";
 
-    // SECTION 3 — DATA STRUCTURE
-    const simulationActions = [
-        { turn: 1, action: "Infantry unit deployed at grid C4" },
-        { turn: 2, action: "Recon squad advanced toward Objective Alpha" },
-        { turn: 3, action: "Armor unit repositioned to sector D3" },
-        { turn: 4, action: "Enemy artillery engaged friendly armor" },
-        { turn: 5, action: "Objective Alpha secured" },
-        { turn: 6, action: "Reinforcements deployed to sector B2" }
-    ];
+    const commandScore = reportData?.commandScore ?? "0%";
+    const operationalEffectiveness = reportData?.operationalEffectiveness ?? "Unknown";
+    const strategicExecution = reportData?.strategicExecution ?? "Unknown";
+    const riskManagement = reportData?.riskManagement ?? "Unknown";
+
+    const alliedVehiclesDamaged = reportData?.alliedVehiclesDamaged ?? "0";
+    const alliedInfantryWounded = reportData?.alliedInfantryWounded ?? "0";
+    const enemyArmorDestroyed = reportData?.enemyArmorDestroyed ?? "0";
+    const enemyArtilleryNeutralized = reportData?.enemyArtilleryNeutralized ?? "0";
+
+    const simulationActions: { turn: number, action: string }[] = reportData?.simulationActions ?? [];
 
     return (
         <div className={`h-screen bg-[#0A0A0A] text-[#E6EDF3] flex flex-col items-center overflow-hidden ${spaceGrotesk.className}`}>

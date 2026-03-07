@@ -732,6 +732,42 @@ export default function WarMatrixPage() {
   };
 
   const handleEndSimulation = () => {
+    if (typeof window !== 'undefined') {
+      const reportData = {
+        missionStatus: battlefieldState?.winner ? (battlefieldState.winner === "FRIENDLY" ? "SUCCESS" : "FAILED") : "COMPLETED",
+        simulationTurns: String(turn).padStart(3, '0'),
+        alliedCasualties: `${combatMetrics.allyUnitsLost} Units`,
+        infantryLost: String(combatMetrics.allyInfantryCasualties),
+        armorLost: String(combatMetrics.allyArmorDamaged),
+        supportUnitsLost: String(combatMetrics.allySupportLost),
+        enemyLosses: `${combatMetrics.enemyUnitsDestroyed} Units`,
+        unitsDestroyed: String(combatMetrics.enemyUnitsDestroyed),
+        unitsCaptured: String(combatMetrics.enemyUnitsCaptured),
+        heavyArmorNeutralized: String(combatMetrics.enemyArmorDestroyed),
+        objectivesCaptured: `${battlefieldState?.objectives.filter(o => o.controller === 'FRIENDLY').length ?? 0} / ${battlefieldState?.objectives.length ?? 0}`,
+        defensiveObjectivesHeld: String(battlefieldState?.objectives.filter(o => o.controller === 'NEUTRAL').length ?? 0),
+        enemyPersonnelCaptured: String(combatMetrics.enemyUnitsCaptured * 12),
+        enemyVehiclesCaptured: String(combatMetrics.enemyArmorDestroyed),
+        intelRecovered: "SECURED",
+        commandScore: lastResult?.success ? `${lastResult.success}%` : "85%",
+        operationalEffectiveness: analysis?.staffAnalysis?.maneuver ? analysis.staffAnalysis.maneuver.split('.')[0] : "Nominal",
+        strategicExecution: analysis?.predictedEnemyBehavior ? analysis.predictedEnemyBehavior.split('.')[0] : "Nominal",
+        riskManagement: lastResult?.risk ? `${lastResult.risk}%` : "Low",
+        alliedVehiclesDamaged: String(combatMetrics.allyArmorDamaged),
+        alliedInfantryWounded: String(combatMetrics.allyInfantryCasualties),
+        enemyArmorDestroyed: String(combatMetrics.enemyArmorDestroyed),
+        enemyArtilleryNeutralized: String(combatMetrics.enemySupportNeutralized),
+        simulationActions: chatMessages
+          .filter(m => m.source === 'COMMAND_INPUT' || (m.source === 'AI_STRATEGIST' && m.headline === 'TACTICAL AI RESPONSE'))
+          .map((m, idx) => ({
+            turn: Math.floor(idx / 2) + 1,
+            action: m.headline === 'TACTICAL AI RESPONSE' && typeof m.body === 'string'
+              ? 'AI Report: ' + m.body.substring(0, 100) + (m.body.length > 100 ? '...' : '')
+              : (typeof m.body === 'string' ? m.body : 'Command executed')
+          }))
+      };
+      sessionStorage.setItem('missionReportData', JSON.stringify(reportData));
+    }
     // Navigate to Final Mission Report
     router.push('/final-report');
   };
