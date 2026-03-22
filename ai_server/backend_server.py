@@ -71,8 +71,41 @@ def log_section(title: str) -> None:
 def _get_base_model_name(adapter_path: str) -> str:
     adapter_config_path = Path(adapter_path) / "adapter_config.json"
     with open(adapter_config_path, "r", encoding="utf-8") as f:
-        adapter_config = json.load(f)
-    return adapter_config["base_model_name_or_path"]
+        raw_text = f.read()
+
+    if not raw_text.strip():
+        raise RuntimeError(
+            f"adapter_config.json is empty at: {adapter_config_path}. "
+            "This usually means model artifacts are missing."
+        )
+
+    if raw_text.startswith("version https://git-lfs.github.com/spec/v1"):
+        raise RuntimeError(
+            "adapter_config.json is a Git LFS pointer, not real JSON. "
+            "Pull model artifacts with Git LFS from the repo root:\n"
+            "  git lfs install\n"
+            "  git lfs pull\n"
+            f"File: {adapter_config_path}"
+        )
+
+    try:
+        adapter_config = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Invalid adapter_config.json at {adapter_config_path}: {exc}"
+        ) from exc
+
+    base_model_name = str(adapter_config.get("base_model_name_or_path", "")).strip()
+    if not base_model_name:
+        base_model_name = os.environ.get("BASE_MODEL_NAME", "").strip()
+
+    if not base_model_name:
+        raise RuntimeError(
+            "Could not determine base model name. Expected 'base_model_name_or_path' in "
+            f"{adapter_config_path} or env var BASE_MODEL_NAME."
+        )
+
+    return base_model_name
 
 
 def _resolve_model_path(model_path: str) -> str:
