@@ -15,6 +15,7 @@ import {
     Eye,
     AlertTriangle,
     HelpCircle,
+    LucideIcon,
 } from 'lucide-react';
 import { strategicCommandChat, StrategicChatOutput } from '@/ai/flows/strategic-command-chat';
 
@@ -100,7 +101,7 @@ interface ActionDef {
     mode: ActionMode;
     label: string;
     sublabel: string;
-    icon: React.ElementType;
+    icon: LucideIcon;
     prompt: string;
 }
 

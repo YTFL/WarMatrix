@@ -26,6 +26,7 @@ import {
     BookOpen,
     MapPin,
     Clock,
+    LucideIcon,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -50,7 +51,7 @@ interface SidebarAccordionProps {
 interface AccordionPanelProps {
     id: string;
     title: string;
-    icon: React.ElementType;
+    icon: LucideIcon;
     activeId: string | null;
     onToggle: (id: string) => void;
     children: React.ReactNode;
@@ -164,7 +165,7 @@ function DataRow({
     value,
     valueColor,
 }: {
-    icon: React.ElementType;
+    icon: LucideIcon;
     label: string;
     value: string;
     valueColor?: string;

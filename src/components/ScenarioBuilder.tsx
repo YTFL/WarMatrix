@@ -26,6 +26,7 @@ import {
   AlertTriangle,
   Cpu,
   Map,
+  LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -77,7 +78,7 @@ interface ScenarioBuilderProps {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const ASSET_CLASSES: { label: AssetClass; icon: React.ElementType }[] = [
+const ASSET_CLASSES: { label: AssetClass; icon: LucideIcon }[] = [
   { label: 'Infantry', icon: Shield },
   { label: 'Mechanized', icon: Zap },
   { label: 'Armor', icon: Swords },
@@ -360,7 +361,7 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
   // ── Mode selection entry cards ────────────────────────────────────────────────
   const ENTRY_OPTIONS: {
     mode: 'CUSTOM' | 'AI';
-    icon: React.ElementType;
+    icon: LucideIcon;
     title: string;
     description: string;
     available: boolean;

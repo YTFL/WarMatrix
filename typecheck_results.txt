@@ -1,0 +1,81 @@
+
+> nextn@0.1.0 typecheck
+> tsc --noEmit
+
+src/components/MapHudBanner.tsx(37,19): error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/MapHudBanner.tsx(61,19): error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/MapHudBanner.tsx(61,39): error TS2322: Type '{ color: string; }' is not assignable to type 'never'.
+src/components/ScenarioBuilder.tsx(480,29): error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/ScenarioBuilder.tsx(480,49): error TS2322: Type '{ color: string; }' is not assignable to type 'never'.
+src/components/ScenarioBuilder.tsx(643,37): error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/ScenarioBuilder.tsx(750,66): error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/SecureCommsConsole.tsx(516,55): error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/SidebarAccordion.tsx(119,21): error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/SidebarAccordion.tsx(120,21): error TS2322: Type '{ color: string; }' is not assignable to type 'never'.
+src/components/SidebarAccordion.tsx(175,23): error TS2322: Type 'string' is not assignable to type 'never'.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/App.tsx(1,51): error TS2307: Cannot find module 'react-router' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/App.tsx(7,25): error TS2307: Cannot find module 'react-hot-toast' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/CanvasPyInterpreter.tsx(5,36): error TS2307: Cannot find module '@heroicons/react/24/outline' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatInputExtraContextItem.tsx(5,8): error TS2307: Cannot find module '@heroicons/react/24/outline' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatMessage.tsx(11,8): error TS2307: Cannot find module '@heroicons/react/24/outline' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(9,50): error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(14,8): error TS2307: Cannot find module '@heroicons/react/24/solid' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(18,8): error TS5097: An import path can only end with a '.tsx' extension when 'allowImportingTsExtensions' is enabled.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(19,22): error TS2307: Cannot find module 'react-dropzone' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(20,19): error TS2307: Cannot find module 'react-hot-toast' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(21,39): error TS5097: An import path can only end with a '.tsx' extension when 'allowImportingTsExtensions' is enabled.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(22,47): error TS5097: An import path can only end with a '.tsx' extension when 'allowImportingTsExtensions' is enabled.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(104,17): error TS2345: Argument of type 'RefObject<HTMLDivElement | null>' is not assignable to parameter of type 'RefObject<HTMLDivElement>'.
+  Type 'HTMLDivElement | null' is not assignable to type 'HTMLDivElement'.
+    Type 'null' is not assignable to type 'HTMLDivElement'.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(349,13): error TS7031: Binding element 'getRootProps' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/ChatScreen.tsx(349,27): error TS7031: Binding element 'getInputProps' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/Header.tsx(5,27): error TS2307: Cannot find module 'daisyui/theme/object' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/Header.tsx(11,8): error TS2307: Cannot find module '@heroicons/react/24/outline' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(2,38): error TS2307: Cannot find module 'react-markdown' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(3,23): error TS2307: Cannot find module 'remark-gfm' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(4,30): error TS2307: Cannot find module 'rehype-highlight' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(5,25): error TS2307: Cannot find module 'rehype-katex' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(6,24): error TS2307: Cannot find module 'remark-math' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(7,26): error TS2307: Cannot find module 'remark-breaks' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(10,38): error TS2307: Cannot find module 'hast' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(11,23): error TS2307: Cannot find module 'unist-util-visit' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(15,49): error TS2307: Cannot find module '@heroicons/react/24/outline' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(33,18): error TS7006: Parameter 'props' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(52,8): error TS7031: Binding element 'node' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(52,14): error TS7031: Binding element 'origContent' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(52,27): error TS7031: Binding element 'isGenerating' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/MarkdownDisplay.tsx(156,38): error TS7006: Parameter 'node' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/SettingDialog.tsx(14,8): error TS2307: Cannot find module '@heroicons/react/24/outline' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/SettingDialog.tsx(434,21): error TS2322: Type 'string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | Promise<...> | null | undefined' is not assignable to type 'ReactNode'.
+  Type 'Promise<ReactNode>' is not assignable to type 'ReactNode'.
+    Type 'Promise<ReactNode>' is not assignable to type 'Promise<AwaitedReactNode>'.
+      Type 'ReactNode' is not assignable to type 'AwaitedReactNode'.
+        Type 'Promise<AwaitedReactNode>' is not assignable to type 'AwaitedReactNode'.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/Sidebar.tsx(5,40): error TS2307: Cannot find module 'react-router' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/Sidebar.tsx(13,8): error TS2307: Cannot find module '@heroicons/react/24/outline' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/Sidebar.tsx(16,19): error TS2307: Cannot find module 'react-hot-toast' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/useChatExtraContext.tsx(3,19): error TS2307: Cannot find module 'react-hot-toast' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/useChatExtraContext.tsx(5,24): error TS2307: Cannot find module 'pdfjs-dist' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/useChatExtraContext.tsx(6,28): error TS2307: Cannot find module 'pdfjs-dist/build/pdf.worker.min.mjs?url' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/useChatExtraContext.tsx(7,39): error TS2307: Cannot find module 'pdfjs-dist/types/src/display/api' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/useChatExtraContext.tsx(208,28): error TS7006: Parameter 'page' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/useChatExtraContext.tsx(213,28): error TS7006: Parameter 'item' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/components/useChatTextarea.ts(100,5): error TS2322: Type 'RefObject<HTMLTextAreaElement | null>' is not assignable to type 'RefObject<HTMLTextAreaElement>'.
+  Type 'HTMLTextAreaElement | null' is not assignable to type 'HTMLTextAreaElement'.
+    Type 'null' is not assignable to type 'HTMLTextAreaElement'.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/Config.ts(1,27): error TS2307: Cannot find module 'daisyui/theme/object' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/Config.ts(4,34): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/main.tsx(4,17): error TS5097: An import path can only end with a '.tsx' extension when 'allowImportingTsExtensions' is enabled.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/app.context.tsx(19,53): error TS2307: Cannot find module 'react-router' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/app.context.tsx(20,19): error TS2307: Cannot find module 'react-hot-toast' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/llama-vscode.ts(2,33): error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/llama-vscode.ts(3,37): error TS5097: An import path can only end with a '.tsx' extension when 'allowImportingTsExtensions' is enabled.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/misc.ts(11,31): error TS2307: Cannot find module '@sec-ant/readable-stream/ponyfill/asyncIterator' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/misc.ts(28,3): error TS2578: Unused '@ts-expect-error' directive.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/storage.ts(6,30): error TS2307: Cannot find module 'dexie' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/storage.ts(41,8): error TS7006: Parameter 'a' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/src/utils/storage.ts(41,11): error TS7006: Parameter 'b' implicitly has an 'any' type.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/vite.config.ts(1,44): error TS2307: Cannot find module 'vite' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/vite.config.ts(2,19): error TS2307: Cannot find module '@vitejs/plugin-react' or its corresponding type declarations.
+tmp_lcpp_src_2/llama_cpp_python-0.3.16/vendor/llama.cpp/tools/server/webui/vite.config.ts(3,32): error TS2307: Cannot find module 'vite-plugin-singlefile' or its corresponding type declarations.

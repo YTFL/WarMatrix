@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Boxes, CloudRain, Eye, Thermometer, Wind } from 'lucide-react';
+import { Boxes, CloudRain, Eye, LucideIcon, Thermometer, Wind } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ interface MapHudBannerProps {
 // ─── Single HUD chip ─────────────────────────────────────────────────────────
 
 interface HudChipProps {
-    icon: React.ElementType;
+    icon: LucideIcon;
     label: string;
     children: React.ReactNode;
 }
@@ -52,7 +52,7 @@ function Stat({
     value,
     color,
 }: {
-    icon: React.ElementType;
+    icon: LucideIcon;
     value: string;
     color?: string;
 }) {
