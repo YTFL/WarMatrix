@@ -151,7 +151,7 @@ export function AITerminalConsole({ logs, isRunning, title = 'AI ENGINE TERMINAL
                 style={{ borderTop: '1px solid rgba(31,111,235,0.12)', background: 'rgba(4,8,18,0.9)' }}
             >
                 <span className="text-[8px] font-mono text-[#2D3748] uppercase tracking-widest">
-                    WARMATRIX ENGINE v4.2 // GENKIT+GEMINI
+                    WARMATRIX ENGINE v4.2 // LOCAL LLM CORE
                 </span>
                 <span className="text-[8px] font-mono text-[#2D3748] tabular-nums">
                     {logs.length} LINES

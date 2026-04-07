@@ -1,13 +1,4 @@
-'use server';
-/**
- * @fileOverview AI flow for the Strategic Operations Chat Console.
- * Handles commander directives and routes them to the appropriate
- * AI response type: scenario narrative, intel update, fog-of-war event,
- * or explainable decision reasoning.
- */
-
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { z } from 'zod';
 
 // ─── Input / Output Schemas ───────────────────────────────────────────────────
 
@@ -46,49 +37,77 @@ export type StrategicChatOutput = z.infer<typeof StrategicChatOutputSchema>;
 export async function strategicCommandChat(
     input: StrategicChatInput
 ): Promise<StrategicChatOutput> {
-    return strategicCommandChatFlow(input);
-}
+    const instruction = `OUTPUT STRICTLY VALID JSON ONLY. NO EXPLANATIONS. NO MARKDOWN.
+You are WARMATRIX — an advanced military AI operating within a secure command-and-control system.
+Maintain military brevity. Use authoritative, technical language.
 
-// ─── Prompt ───────────────────────────────────────────────────────────────────
+ABBREVIATION KEYS (MUST MATCH EXACTLY):
+"s" = source (AI_STRATEGIST | SIMULATION_ENGINE | INTEL_DIVISION | FOG_OF_WAR_MODULE)
+"h" = headline (string, max 12 words)
+"b" = body (string, 2-5 sentences)
+"c" = classification (TOP_SECRET | SECRET | CONFIDENTIAL | UNCLASSIFIED)
+"m" = metrics (array of { "l": string, "v": string }) [Optional]
 
-const strategicChatPrompt = ai.definePrompt({
-    name: 'strategicCommandChatPrompt',
-    input: { schema: StrategicChatInputSchema },
-    output: { schema: StrategicChatOutputSchema },
-    prompt: `You are WARMATRIX — an advanced military AI operating within a secure command-and-control system. You respond to operator directives with precision, authority, and tactical realism.
+EXAMPLE JSON TO OUTPUT:
+{"s":"AI_STRATEGIST","h":"...","b":"...","c":"SECRET"}
 
-OPERATIONAL MODE: {{{mode}}}
-BATTLEFIELD CONTEXT: {{{context}}}
-OPERATOR DIRECTIVE: {{{directive}}}
+MODE: ${input.mode}
+INSTRUCTIONS:
+- SCENARIO_SEED: Generate scenario narrative. Source = AI_STRATEGIST.
+- INTEL_UPDATE: Intelligence summary. Source = INTEL_DIVISION.
+- FOG_OF_WAR: Inject uncertainty event. Source = FOG_OF_WAR_MODULE.
+- EXPLAIN_DECISION: Explain decision with metrics. Source = SIMULATION_ENGINE.
+- GENERAL: Tactical analysis. Source = AI_STRATEGIST.`;
 
-MODE INSTRUCTIONS:
-- SCENARIO_SEED: Generate a detailed scenario narrative including strategic context, battlefield situation, and initial intelligence briefing. Source = AI_STRATEGIST.
-- INTEL_UPDATE: Produce an intelligence summary including enemy movements, signals intercepts, and threat assessments. Source = INTEL_DIVISION.
-- FOG_OF_WAR: Inject an uncertainty event (lost comms, unidentified units, weather disruption, civilian interference). Source = FOG_OF_WAR_MODULE.
-- EXPLAIN_DECISION: Provide structured explainable reasoning for simulation results, predicted outcomes, or risk signals. Source = SIMULATION_ENGINE. Include metrics (probability%, risk level, etc.).
-- GENERAL: Respond as the AI STRATEGIST with the most appropriate analysis.
+    const battlefield_data = `CONTEXT: ${input.context || 'Field Operations'}
+DIRECTIVE: ${input.directive}
 
-Maintain military brevity. Use authoritative, technical language. Never break character.
-Return a single valid JSON object with exactly these fields:
-- source: one of "AI_STRATEGIST" | "SIMULATION_ENGINE" | "INTEL_DIVISION" | "FOG_OF_WAR_MODULE"
-- headline: string (max 12 words)
-- body: string (2-5 sentences, military tone)
-- classification: one of "TOP_SECRET" | "SECRET" | "CONFIDENTIAL" | "UNCLASSIFIED"
-- metrics: array of { label: string, value: string } (optional, omit if not applicable)
+GENERATE RAW JSON DICTIONARY:`;
 
-Respond only with the JSON object. No markdown fences, no commentary.`,
-});
+    try {
+        const res = await fetch('http://127.0.0.1:8000/api/sitrep', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                instruction,
+                battlefield_data,
+                max_new_tokens: 400,
+                use_cache: true,
+                do_sample: false,
+            })
+        });
 
-// ─── Flow ─────────────────────────────────────────────────────────────────────
+        if (!res.ok) {
+            throw new Error(`Local backend error (${res.status})`);
+        }
 
-const strategicCommandChatFlow = ai.defineFlow(
-    {
-        name: 'strategicCommandChatFlow',
-        inputSchema: StrategicChatInputSchema,
-        outputSchema: StrategicChatOutputSchema,
-    },
-    async (input) => {
-        const { output } = await strategicChatPrompt(input);
-        return output!;
+        const data = await res.json();
+        let text = data.response?.trim() || '';
+        text = text.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+
+        const match = text.match(/\{[\s\S]*\}/);
+        const jsonString = match ? match[0] : text;
+        const parsed = JSON.parse(jsonString);
+
+        const mapped: StrategicChatOutput = {
+            source: parsed.s || parsed.source || 'AI_STRATEGIST',
+            headline: parsed.h || parsed.headline || 'COMMUNICATION RECEIVED',
+            body: parsed.b || parsed.body || 'Uplink established. Awaiting tactical synchronization.',
+            classification: parsed.c || parsed.classification || 'CONFIDENTIAL',
+            metrics: (parsed.m || parsed.metrics || []).map((m: any) => ({
+                label: m.l || m.label,
+                value: m.v || m.value,
+            })),
+        };
+
+        return StrategicChatOutputSchema.parse(mapped);
+    } catch (e) {
+        console.error('Strategic Chat Inference Error:', e);
+        return {
+            source: 'AI_STRATEGIST',
+            headline: 'COMMUNICATIONS LINK FAILURE',
+            body: 'Strategic analysis link to local LLM backend interrupted. Check system logs for connectivity status.',
+            classification: 'UNCLASSIFIED',
+        };
     }
-);
+}

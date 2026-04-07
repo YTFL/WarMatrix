@@ -69,19 +69,22 @@ Upon mission completion, the system transitions to a **Final Mission Report** (A
 *   **API Layer:** Python FastAPI (Uvicorn)
 *   **Core Math:** Custom Python-based simulation engine (`backend/engine/`) handling pathfinding, combat probability, and state persistence.
 
-### 🧠 AI Integration (Synthetic Strategy)
-*   **Orchestration:** Firebase Genkit
-*   **Intelligence:** Google Gemini (via `@genkit-ai/google-genai`)
-*   **Capabilities:** Narrative generation, scenario synthesis, and strategic behavior modeling.
+### AI Integration: Synthetic Strategy
+- **Engine:** Local LLM Backend (`ai_server/`).
+- **Model Layer:** Fine-tuned local models (e.g. Qwen, Llama).
+- **Functionality:** 
+  - Dynamic scenario generation based on user parameters.
+  - Narrative transformations of raw simulation data into military-grade briefings.
+  - Strategic prediction of enemy behavior.
 
 ---
 
 ## 📂 Project Structure
 
-- **`src/`**: Next.js frontend (App Router, Tactical Components, Hooks).
-- **`backend/`**: FastAPI endpoints and core Python simulation engine.
-- **`ai_server/`**: Genkit configurations and AI Flow definitions.
-- **`docs/`**: Feature blueprints and design specifications.
+- **`src/`**: Next.js App Router, custom components (Map, HUD, Console), and client-side simulation logic.
+- **`backend/`**: FastAPI implementation and the core simulation math for the battlefield engine.
+- **`ai_server/`**: Local LLM backend server and model checkpoint management.
+- **`docs/`**: Technical blueprints and design specifications.
 - **`scripts/`**: Development utilities for service orchestration.
 
 ---
@@ -91,12 +94,14 @@ Upon mission completion, the system transitions to a **Final Mission Report** (A
 ### 📋 Prerequisites
 - **Node.js** (v20+)
 - **Python** (v3.10+)
+- **NVIDIA GPU** (Required for local LLM inference)
 
 ### 🔌 Installation & Execution
 
 1.  **Dependencies:** `npm install`
-2.  **Backend Environment:** Ensure you have a `.venv` in the `/backend` directory and run `pip install -r requirements.txt`.
-3.  **Run Services:**
+2.  **Simulation Backend:** Ensure you have a `.venv` in the `/backend` directory and run `pip install -r requirements.txt`.
+3.  **AI Server:** See `ai_server/requirements.txt` for local LLM setup.
+4.  **Run Services:**
     ```bash
     # Launches both Frontend and Backend concurrently
     npm run dev

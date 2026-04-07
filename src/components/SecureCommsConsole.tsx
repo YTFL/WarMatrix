@@ -244,37 +244,22 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                 usedFallback = true;
             }
 
-            // ── FALLBACK: Genkit / Gemini ─────────────────────────────────────
-            // Controlled by NEXT_PUBLIC_GEMINI_FALLBACK_ENABLED in .env.local.
-            // Set to "true" to re-enable. API key: GOOGLE_GENAI_API_KEY in .env.local.
-            const geminiFallbackEnabled =
-                process.env.NEXT_PUBLIC_GEMINI_FALLBACK_ENABLED === 'true';
-
+            // ── STRATEGIC ANALYSIS: Local LLM fallback ─────────────────────────
             if (usedFallback || aiMsg === null) {
-                if (geminiFallbackEnabled) {
-                    const result: StrategicChatOutput = await strategicCommandChat({
-                        directive: directive.trim(),
-                        mode,
-                        context: battlefieldContext,
-                    });
-                    aiMsg = {
-                        id: `ai-${Date.now()}`,
-                        source: result.source as MessageSource,
-                        headline: result.headline,
-                        body: result.body,
-                        timestamp: nowTs(),
-                        classification: result.classification,
-                        metrics: result.metrics,
-                    };
-                } else {
-                    // Fallback disabled — surface the specific error from the server
-                    aiMsg = {
-                        id: `sys-${Date.now()}`,
-                        source: 'SYSTEM',
-                        body: serverErrorMsg ?? 'AI server did not respond. Check that backend_server.py is running.',
-                        timestamp: nowTs(),
-                    };
-                }
+                const result: StrategicChatOutput = await strategicCommandChat({
+                    directive: directive.trim(),
+                    mode,
+                    context: battlefieldContext,
+                });
+                aiMsg = {
+                    id: `ai-${Date.now()}`,
+                    source: result.source as MessageSource,
+                    headline: result.headline,
+                    body: result.body,
+                    timestamp: nowTs(),
+                    classification: result.classification,
+                    metrics: result.metrics,
+                };
             }
 
             onMessagesChange((prev) => [...prev, aiMsg!]);

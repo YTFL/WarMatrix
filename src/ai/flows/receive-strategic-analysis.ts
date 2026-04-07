@@ -1,14 +1,14 @@
 'use server';
 /**
- * @fileOverview This file implements a Genkit flow for generating AI-powered strategic battlefield analysis.
+ * @fileOverview This file implements a flow for generating AI-powered strategic battlefield analysis
+ * using the local LLM backend.
  *
  * - receiveStrategicAnalysis - A function that triggers the strategic analysis process.
  * - ReceiveStrategicAnalysisInput - The input type for the receiveStrategicAnalysis function.
  * - ReceiveStrategicAnalysisOutput - The return type for the receiveStrategicAnalysis function.
  */
 
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { z } from 'zod';
 
 const ReceiveStrategicAnalysisInputSchema = z.object({
   battlefieldSummary: z
