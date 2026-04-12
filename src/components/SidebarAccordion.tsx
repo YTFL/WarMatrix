@@ -28,6 +28,7 @@ import {
     Clock,
     LucideIcon,
 } from 'lucide-react';
+import { TacticalHandbook } from './TacticalHandbook';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ interface SidebarAccordionProps {
     loadingAnalysis: boolean;
     analysis: any;
     turn: number;
+    onMaximizeHandbook?: () => void;
 }
 
 // ─── Accordion Panel ─────────────────────────────────────────────────────────
@@ -318,6 +320,7 @@ export function SidebarAccordion({
     loadingAnalysis,
     analysis,
     turn,
+    onMaximizeHandbook,
 }: SidebarAccordionProps) {
     const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -591,6 +594,18 @@ export function SidebarAccordion({
                         )}
                     </div>
                 )}
+            </AccordionPanel>
+
+            {/* ── 6. SOP Tactical Handbook ── */}
+            <AccordionPanel
+                id="handbook"
+                title="SOP Tactical Handbook"
+                icon={BookOpen}
+                activeId={activeId}
+                onToggle={handleToggle}
+                statusDot="gray"
+            >
+                <TacticalHandbook onMaximize={onMaximizeHandbook} />
             </AccordionPanel>
 
         </div>

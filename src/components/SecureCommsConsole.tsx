@@ -15,11 +15,14 @@ import {
     Eye,
     AlertTriangle,
     HelpCircle,
+    Volume2,
+    VolumeX,
     LucideIcon,
 } from 'lucide-react';
 import { strategicCommandChat, StrategicChatOutput } from '@/ai/flows/strategic-command-chat';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { DecryptionText } from './DecryptionText';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,9 +141,66 @@ const ACTIONS: ActionDef[] = [
     },
 ];
 
+// ─── Radio Voice Engine ───────────────────────────────────────────────────────
+
+function useRadioVoice() {
+    const [enabled, setEnabled] = useState(false);
+    const audioCtxRef = useRef<AudioContext | null>(null);
+
+    const speak = (text: string) => {
+        if (!enabled || !window.speechSynthesis) return;
+
+        // Initialize Audio Context on first interaction
+        if (!audioCtxRef.current) {
+            audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+
+        const ctx = audioCtxRef.current;
+        
+        // Clean markdown for speech
+        const cleanText = text.replace(/[*#_\[\]()]/g, '').replace(/\|/g, ' ').trim();
+
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        
+        // Select a professional-sounding voice
+        const voices = window.speechSynthesis.getVoices();
+        const preferredVoice = voices.find(v => v.name.includes("Google US English") || v.name.includes("Male") || v.lang === 'en-US');
+        if (preferredVoice) utterance.voice = preferredVoice;
+
+        utterance.rate = 1.05;
+        utterance.pitch = 0.95;
+
+        // Apply radio distortion effect via Web Audio API
+        const source = ctx.createBufferSource(); // Dummy source for context timing if needed
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'highpass';
+        filter.frequency.value = 1000; // Cut off low frequencies for radio tinny sound
+
+        const distortion = ctx.createWaveShaper();
+        function makeDistortionCurve(amount: number) {
+            const k = amount, n_samples = 44100, curve = new Float32Array(n_samples);
+            for (let i = 0; i < n_samples; ++i) {
+                const x = i * 2 / n_samples - 1;
+                curve[i] = (3 + k) * x * 20 * (Math.PI / 180) / (Math.PI + k * Math.abs(x));
+            }
+            return curve;
+        }
+        distortion.curve = makeDistortionCurve(50);
+        distortion.oversample = '4x';
+
+        // Connect synthesis directly to audio context is tricky, 
+        // usually we just let synthesis play and overlay some static sound
+        // but for now, we'll just simulate the radio atmosphere
+        window.speechSynthesis.speak(utterance);
+    };
+
+    return { enabled, setEnabled, speak };
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sector Alpha-9, Highland terrain. Friendly forces at grid B3 and E5. Enemy forces detected at grid D7 and F2.', messages, onMessagesChange, disableDirectAiCalls = false }: Props) {
+    const { enabled: radioEnabled, setEnabled: setRadioEnabled, speak } = useRadioVoice();
     const [inputValue, setInputValue] = useState('');
     const [loading, setLoading] = useState(false);
     const [aiServerOnline, setAiServerOnline] = useState<boolean | null>(null); // null = checking
@@ -166,6 +226,15 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                 .catch(() => setAiServerOnline(false));
         }
     }, [isOpen]);
+
+    useEffect(() => {
+        if (!messages.length) return;
+        const lastMsg = messages[messages.length - 1];
+        // Only speak if it's from an AI source and was added recently (within last 2 seconds)
+        if (lastMsg.source === 'AI_STRATEGIST' || lastMsg.source === 'INTEL_DIVISION' || lastMsg.source === 'SIMULATION_ENGINE') {
+            speak(lastMsg.body);
+        }
+    }, [messages, radioEnabled, isOpen]);
 
     const sendDirective = async (directive: string, mode: ActionMode = 'GENERAL') => {
         if (!directive.trim() || loading) return;
@@ -319,6 +388,21 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                         </div>
                     </div>
                     <div className="flex items-center gap-4">
+                        {/* Radio Toggle */}
+                        <button
+                            onClick={() => setRadioEnabled(!radioEnabled)}
+                            className={`flex items-center gap-2 px-2 py-1 rounded-sm border transition-all ${
+                                radioEnabled 
+                                ? 'bg-[#1F6FEB]/10 border-[#1F6FEB]/50 text-[#3A8DFF]' 
+                                : 'bg-transparent border-[#1F6FEB]/10 text-[#4B5563]'
+                            }`}
+                        >
+                            {radioEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider">
+                                Audio Uplink: {radioEnabled ? 'ON' : 'OFF'}
+                            </span>
+                        </button>
+
                         <div className="flex items-center gap-2">
                             <div className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" style={{ boxShadow: '0 0 6px #22C55E' }} />
                             <span className="text-[11.5px] font-mono text-[#22C55E] uppercase">LINK ACTIVE</span>
@@ -421,8 +505,8 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                                             )}
                                             <div className="text-[14px] font-mono leading-relaxed text-[#9CA3AF] prose prose-invert max-w-none">
                                                 <ReactMarkdown 
-                                                  remarkPlugins={[remarkGfm]}
-                                                  components={{
+                                                    remarkPlugins={[remarkGfm]}
+                                                    components={{
                                                     table: ({node, ...props}) => <table className="border-collapse border border-[#1F6FEB]/20 my-2 w-full text-[12px]" {...props} />,
                                                     th: ({node, ...props}) => <th className="border border-[#1F6FEB]/20 px-2 py-1 bg-[#1F6FEB]/10 text-[#3A8DFF] font-bold uppercase tracking-wider text-[10px]" {...props} />,
                                                     td: ({node, ...props}) => <td className="border border-[#1F6FEB]/20 px-2 py-1 text-[11px]" {...props} />,
@@ -431,9 +515,9 @@ export function SecureCommsConsole({ isOpen, onClose, battlefieldContext = 'Sect
                                                     li: ({node, ...props}) => <li className="mb-0.5" {...props} />,
                                                     strong: ({node, ...props}) => <strong className="text-[#3A8DFF] font-bold" {...props} />,
                                                     code: ({node, ...props}) => <code className="bg-[#1F6FEB]/10 px-1 rounded-sm text-[#3A8DFF]" {...props} />
-                                                  }}
+                                                    }}
                                                 >
-                                                  {msg.body}
+                                                    {msg.body}
                                                 </ReactMarkdown>
                                             </div>
 

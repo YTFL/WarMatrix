@@ -13,6 +13,7 @@ import { TacticalWidget } from '@/components/TacticalWidget';
 import { TacticalTerrainMapData, TacticalTeam, buildTerrainGridFromPeaks } from '@/lib/tacticalTerrain';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { TacticalHandbookConsole } from '@/components/TacticalHandbookConsole';
 import {
   Activity,
   CloudRain,
@@ -321,10 +322,19 @@ export default function WarMatrixPage() {
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysis, setAnalysis] = useState<any>(null);
   const [role, setRole] = useState<'BLUE_TEAM' | 'RED_TEAM'>('BLUE_TEAM');
+
+  // ─── Authentication Guard ──────────────────────────────────────────────────
+  useEffect(() => {
+    const isAuth = localStorage.getItem("warmatrix_auth") === "true";
+    if (!isAuth) {
+      router.push("/login"); // Emergency redirect to Authorization Portal
+    }
+  }, [router]);
   const [centerScenarioMode, setCenterScenarioMode] = useState<'default' | 'random' | 'custom'>('default');
   const [isBuilderWorkspaceActive, setIsBuilderWorkspaceActive] = useState(false);
   const [builderScenarioMode, setBuilderScenarioMode] = useState<'selection' | 'random' | 'custom'>('selection');
   const [isCommsConsoleOpen, setIsCommsConsoleOpen] = useState(false);
+  const [isHandbookConsoleOpen, setIsHandbookConsoleOpen] = useState(false);
   const [isBriefingModalOpen, setIsBriefingModalOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [lastResult, setLastResult] = useState<{
@@ -860,6 +870,7 @@ export default function WarMatrixPage() {
             loadingAnalysis={loadingAnalysis}
             analysis={analysis}
             turn={turn}
+            onMaximizeHandbook={() => setIsHandbookConsoleOpen(true)}
           />
 
           <TacticalWidget title="Comm Status" icon={Radio}>
@@ -1346,6 +1357,11 @@ export default function WarMatrixPage() {
         battlefieldContext={activeScenario
           ? `Turn ${turn}. Role: ${role}. Scenario: ${activeScenario.title}. Terrain: ${activeScenario.terrainType}. ${units.map(u => `${u.label} (${u.type}) at [${u.x},${u.y}]`).join(', ')}.`
           : `No scenario active. Role: ${role}.`}
+      />
+
+      <TacticalHandbookConsole 
+        isOpen={isHandbookConsoleOpen}
+        onClose={() => setIsHandbookConsoleOpen(false)}
       />
 
       <div className="fixed inset-0 pointer-events-none z-[60] opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
