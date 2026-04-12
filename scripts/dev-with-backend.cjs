@@ -118,7 +118,7 @@ startProcess({
   shell: false,
   env: {
     ...process.env,
-    HF_TOKEN: process.env.HF_TOKEN || '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',
+    HF_TOKEN: process.env.HF_TOKEN,
     USE_LM_STUDIO: process.env.USE_LM_STUDIO || 'true', // 'true' or 'false'
     LM_STUDIO_IP: process.env.LM_STUDIO_IP || '192.168.144.11',
     LM_STUDIO_PORT: process.env.LM_STUDIO_PORT || '1234',
