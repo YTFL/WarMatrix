@@ -1,4 +1,4 @@
-# WarMatrix AI Setup — DIMBASS
+# WarMatrix AI Setup
 
 Purpose
 
@@ -154,19 +154,3 @@ Commit `wargame_unsloth_env.yml` to the repo to allow exact reproduction elsewhe
 - If `adapter_config.json` is a Git LFS pointer run `git lfs install` and `git lfs pull`.
 - `bitsandbytes` and CUDA compatibility: ensure your CUDA toolkit and drivers match the installed `torch` build (this host uses CUDA 12.1).
 - If `transformers` import fails due to a conflicting package (e.g., `torchao`), try uninstalling or aligning that package.
-
-**Next recommended actions**
-
-- Export and commit the conda environment YAML (command above) so others can reproduce the exact package set.
-- Place the model checkpoint (with `adapter_config.json`) at the default path or set `MODEL_PATH` to the real folder.
-- Start the server from the environment you plan to use (Conda for GPU; `.venv` for CPU/testing).
-
-**Files referenced**
-
-- `ai_server/ENV_README.md` — environment-variable quick usage and notes
-- `ai_server/set_env.ps1` — helper to apply safe defaults
-- `ai_server/requirements.txt` — pip-level backend requirements
-
-----
-
-If you want, I can now export the detected `wargame_unsloth` environment to `ai_server/wargame_unsloth_env.yml` and add it to the repo. Say "export and add" and I will do that next.
