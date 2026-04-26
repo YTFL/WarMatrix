@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { RotateCcw, ZoomIn, ZoomOut, Square } from 'lucide-react';
+import { RotateCcw, ZoomIn, ZoomOut, Square, Zap } from 'lucide-react';
 import { TacticalTerrainMapData } from '@/lib/tacticalTerrain';
 import { TerrainPeak, TACTICAL_CONTOUR_LEVELS, buildProceduralHeightmap } from '@/lib/proceduralTerrainHeightmap';
 import type { TacticalMap3DControls } from '@/components/TacticalMap3D';
@@ -52,6 +52,7 @@ interface TacticalMapDisplayProps {
     unitHpById?: Record<string, { hp: number; maxHp: number }>;
     objectiveProgressById?: Record<string, { friendly: number; enemy: number; controller: 'FRIENDLY' | 'ENEMY' | 'NEUTRAL' }>;
     onEndSimulation?: () => void;
+    onExecuteTurn?: () => void;
     terrainMapData?: TacticalTerrainMapData;
     terrainVersionKey?: string;
 }
@@ -147,6 +148,7 @@ export function TacticalMapDisplay({
     unitHpById,
     objectiveProgressById,
     onEndSimulation,
+    onExecuteTurn,
     terrainMapData,
     terrainVersionKey,
 }: TacticalMapDisplayProps) {
@@ -728,6 +730,23 @@ export function TacticalMapDisplay({
                             {scenarioTitle}
                         </span>
                     </div>
+
+                    {onExecuteTurn && (
+                        <button
+                            onClick={onExecuteTurn}
+                            className="px-3 py-[5px] rounded-sm flex items-center gap-2 transition-all group animate-pulse"
+                            style={{
+                                background: 'rgba(58,141,255,0.15)',
+                                border: '1px solid rgba(58,141,255,0.45)',
+                                backdropFilter: 'blur(6px)',
+                            }}
+                        >
+                            <Zap className="w-2.5 h-2.5 text-[#3A8DFF] fill-[#3A8DFF]/10 transition-all group-hover:scale-110 group-hover:fill-[#3A8DFF]/30" />
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-[#3A8DFF] group-hover:text-[#5CABFF] group-hover:drop-shadow-[0_0_5px_rgba(58,141,255,0.45)]">
+                                EXECUTE TURN
+                            </span>
+                        </button>
+                    )}
 
                     {onEndSimulation && (
                         <button

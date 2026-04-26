@@ -1,35 +1,73 @@
-### 3.2.1 LM Studio Setup (Dev Mode)
+# 🎖️ WarMatrix: Universal Setup Guide
 
-If you want to use LM Studio instead of loading the model locally (useful for VRAM-constrained systems):
+Welcome to the WarMatrix Command Center. Follow this guide to initialize the tactical simulation suite and prepare for deployment.
 
-1. **Enable Developer Mode in LM Studio:**
-   - Open LM Studio
-   - Go to **Settings** → **Developer Mode** (toggle ON)
+---
 
-2. **Load and Start a Model:**
-   - In Developer Mode, select a GGUF model from your library
-   - Click **Load Model**
-   - Wait for it to load, then click **Start Server**
-   - The server will run on `localhost:1234` by default
+## 📋 Phase 1: System Prerequisites
 
-3. **Configure Environment Variables:**
-   - Open PowerShell in your workspace
-   - Activate your virtualenv: `. .\.venv\Scripts\Activate.ps1`
-   - Set the LM Studio environment variables:
-     ```powershell
-     $env:USE_LM_STUDIO = 'true'
-     $env:LM_STUDIO_IP = '192.168.1.15'  # Use 'localhost' if local
-     $env:LM_STUDIO_PORT = '1234'
-     $env:LM_STUDIO_API_KEY = 'your-token-if-required'  # Leave empty if no auth
-     ```
+Before proceeding, ensure your station is equipped with the following:
 
-4. **Verify Connection:**
-   - Run the AI server: `python .\ai_server\backend_server.py`
-   - Test the health endpoint: `curl http://localhost:8000/health`
-   - Check that the response confirms LM Studio connection
+- **Node.js**: v20 or higher.
+- **Python**: v3.10 to v3.12 (v3.12 recommended).
+- **Git**: Required for repository management and model acquisition.
+- **NVIDIA GPU**: Required for high-performance local AI inference (VRAM: 8GB+ recommended, 4GB minimum with quantization).
 
-5. **Troubleshooting:**
-   - If connection fails, verify LM Studio is running and accessible at the specified IP/port
-   - Check firewall settings if connecting across machines on your network
-   - Verify the model is fully loaded (check LM Studio UI for status)
+---
 
+## 🔌 Phase 2: Core Application Setup
+
+Initialize the primary interface and the simulation engine.
+
+1.  **Frontend Installation**:
+    ```bash
+    # Install dependencies
+    npm install
+    ```
+
+2.  **Simulation Backend Setup**:
+    ```powershell
+    # Navigate to root (if not already there)
+    cd WarMatrix
+
+    # Create and activate virtual environment
+    python -m venv .venv
+    & .\.venv\Scripts\Activate.ps1
+
+    # Install core simulation requirements
+    pip install -r backend/requirements.txt
+    ```
+
+---
+
+## 🧠 Phase 3: AI Server Configuration
+
+WarMatrix uses a dedicated AI server for tactical synthesis and scenario generation. Choose the method that best fits your hardware capabilities:
+
+### **Method A: Quick Start / Standard (Recommended)**
+Use this if you want to get up and running quickly using a standard virtual environment.
+👉 **[View Quick Start Guide](./ai_server/SETUP_QUICKSTART.md)**
+
+### **Method B: High-Performance GPU (Conda/Unsloth)**
+Use this for the best performance. Optimized for NVIDIA GPUs using Conda and Unsloth for ultra-fast response times.
+👉 **[View High-Performance Guide](./ai_server/SETUP_LOCAL_GPU.md)**
+
+### **Method C: LM Studio Proxy (Lightweight)**
+Use this if you are VRAM-constrained or want to run the model on a separate machine in your network via LM Studio.
+👉 **[View LM Studio Guide](./ai_server/SETUP_LM_STUDIO.md)**
+
+---
+
+## 🚀 Phase 4: Launching the System
+
+Once all components are configured, you can launch the entire suite concurrently:
+
+```bash
+# Launch both Frontend and Backend concurrently
+npm run dev
+```
+
+The Command Console will be available at `http://localhost:3000`.
+
+---
+*Document maintained by the WarMatrix Operational Command.*

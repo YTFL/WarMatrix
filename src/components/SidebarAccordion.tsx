@@ -75,9 +75,11 @@ function AccordionPanel({
     const contentRef = useRef<HTMLDivElement>(null);
     const [height, setHeight] = useState(0);
 
+    const MAX_HEIGHT = 300;
+
     useEffect(() => {
         if (isOpen && contentRef.current) {
-            setHeight(contentRef.current.scrollHeight);
+            setHeight(Math.min(contentRef.current.scrollHeight, MAX_HEIGHT));
         } else {
             setHeight(0);
         }
@@ -149,8 +151,12 @@ function AccordionPanel({
             >
                 <div
                     ref={contentRef}
-                    className="px-3 pb-3"
-                    style={{ borderTop: '1px solid rgba(31,111,235,0.12)' }}
+                    className="px-3 pb-3 warmatrix-scrollbar"
+                    style={{ 
+                        borderTop: '1px solid rgba(31,111,235,0.12)',
+                        maxHeight: `${MAX_HEIGHT}px`,
+                        overflowY: 'auto'
+                    }}
                 >
                     <div className="pt-2.5">{children}</div>
                 </div>
@@ -197,9 +203,11 @@ function LastKnownCoordsPanel({ activeScenario }: { activeScenario: ActiveScenar
     const contentRef = useRef<HTMLDivElement>(null);
     const [height, setHeight] = useState(0);
 
+    const MAX_HEIGHT = 150;
+
     useEffect(() => {
         if (isExpanded && contentRef.current) {
-            setHeight(contentRef.current.scrollHeight);
+            setHeight(Math.min(contentRef.current.scrollHeight, MAX_HEIGHT));
         } else {
             setHeight(0);
         }
@@ -266,7 +274,11 @@ function LastKnownCoordsPanel({ activeScenario }: { activeScenario: ActiveScenar
 
             {/* Expandable body */}
             <div style={{ height: `${height}px`, overflow: 'hidden', transition: 'height 0.25s cubic-bezier(0.4,0,0.2,1)' }}>
-                <div ref={contentRef} className="px-3 py-2.5" style={{ borderTop: '1px solid rgba(31,111,235,0.10)' }}>
+                <div ref={contentRef} className="px-3 py-2.5 warmatrix-scrollbar" style={{ 
+                    borderTop: '1px solid rgba(31,111,235,0.10)',
+                    maxHeight: `${MAX_HEIGHT}px`,
+                    overflowY: 'auto'
+                }}>
                     {activeScenario && hasCoords ? (
                         <div className="flex flex-col gap-1.5">
                             {/* Title */}

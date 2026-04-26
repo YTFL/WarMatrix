@@ -98,21 +98,18 @@ Upon mission completion, the system transitions to a **Final Mission Report** (A
 
 ## 🚀 Getting Started
 
-### 📋 Prerequisites
-- **Node.js** (v20+)
-- **Python** (v3.10+)
-- **NVIDIA GPU** (Required for local LLM inference)
+To initialize the WarMatrix environment, configure the simulation engine, and deploy the AI Strategist, please refer to our central onboarding documentation:
 
-### 🔌 Installation & Execution
+👉 **[Universal Setup Guide](./setup.md)**
 
-1.  **Dependencies:** `npm install`
-2.  **Simulation Backend:** Ensure you have a `.venv` in the `/backend` directory and run `pip install -r requirements.txt`.
-3.  **AI Server:** See `ai_server/requirements.txt` for local LLM setup.
-4.  **Run Services:**
-    ```bash
-    # Launches both Frontend and Backend concurrently
-    npm run dev
-    ```
+### ⚡ Quick Start
+```bash
+# Install dependencies
+npm install
+
+# Start the full tactical suite
+npm run dev
+```
 
 ---
 

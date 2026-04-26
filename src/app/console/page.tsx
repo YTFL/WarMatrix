@@ -335,7 +335,9 @@ export default function WarMatrixPage() {
   const [builderScenarioMode, setBuilderScenarioMode] = useState<'selection' | 'random' | 'custom'>('selection');
   const [isCommsConsoleOpen, setIsCommsConsoleOpen] = useState(false);
   const [isHandbookConsoleOpen, setIsHandbookConsoleOpen] = useState(false);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [isBriefingModalOpen, setIsBriefingModalOpen] = useState(false);
+  const [lastAdvisoryAdvice, setLastAdvisoryAdvice] = useState<string>('');
   const [inputValue, setInputValue] = useState('');
   const [lastResult, setLastResult] = useState<{
     command: string;
@@ -595,9 +597,18 @@ export default function WarMatrixPage() {
     setPendingOperationConfig(null);
   };
 
-  const handleExecuteCommand = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!inputValue.trim() || status === 'PROCESSING') return;
+  const handleExecuteCommand = async (eOrCommand?: React.FormEvent | string) => {
+    let command = "";
+    
+    if (typeof eOrCommand === "string") {
+      command = eOrCommand.trim();
+    } else {
+      eOrCommand?.preventDefault();
+      command = inputValue.trim();
+      setInputValue("");
+    }
+
+    if (!command || status === "PROCESSING") return;
     if (!activeScenario) {
       toast({
         title: 'No Simulation Active',
@@ -616,8 +627,6 @@ export default function WarMatrixPage() {
       return;
     }
 
-    const command = inputValue.trim();
-    setInputValue('');
     setStatus('PROCESSING');
     setLoadingAnalysis(true);
 
@@ -631,51 +640,83 @@ export default function WarMatrixPage() {
     setChatMessages(prev => [...prev, userMsg]);
 
     try {
-      const structuredCommand = buildStructuredCommand(command, battlefieldState);
+      const lowerCmd = command.toLowerCase();
+      const isExecutionCommand = /(proceed|execute|next turn|advance|continue)/i.test(lowerCmd);
+      
+      let res;
+      if (isExecutionCommand) {
+        // Execute Simulation Tick
+        // Inject last advisory context if it exists to ensure AI carries out the plan
+        const enrichedCommand = lastAdvisoryAdvice 
+          ? `EXECUTE THE FOLLOWING PLAN: ${lastAdvisoryAdvice}. User Directive: ${command}`
+          : command;
 
-      const res = await fetch('/api/sitrep', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          command: structuredCommand,
-          end_simulation: false,
-          current_state: battlefieldState,
-          max_new_tokens: 320,
-          temperature: 0.35,
-          top_p: 0.9,
-        }),
-      });
+        const structuredCommand = buildStructuredCommand(enrichedCommand, battlefieldState);
+        res = await fetch('/api/sitrep', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            command: structuredCommand,
+            end_simulation: false,
+            current_state: battlefieldState,
+            max_new_tokens: 320,
+            temperature: 0.35,
+            top_p: 0.9,
+          }),
+        });
+      } else {
+        // Advisory Chat Only
+        res = await fetch('/api/sitrep', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            directive: command,
+            battlefield_data: JSON.stringify(battlefieldState),
+            mode: 'GENERAL',
+            max_new_tokens: 320,
+            temperature: 0.45,
+          }),
+        });
+      }
 
       const data = (await res.json()) as SimulationResponse;
 
+      if (!isExecutionCommand && data.ai_narrative_output) {
+        setLastAdvisoryAdvice(data.ai_narrative_output);
+      }
+
       if (res.ok) {
-        const state = data.updated_battlefield_state;
-        const displayUnits = mapBackendToDisplayUnits(state, units);
+        if (data.updated_battlefield_state) {
+          const state = data.updated_battlefield_state;
+          const displayUnits = mapBackendToDisplayUnits(state, units);
 
-        setBattlefieldState(state);
-        setUnits(displayUnits);
-        setTurn(state.turn);
-        setMovementEvents(data.unit_movements ?? []);
-        setCombatEvents(data.combat_results ?? []);
-        updateMetricsFromState(state);
+          setBattlefieldState(state);
+          setUnits(displayUnits);
+          setTurn(state.turn);
+          setMovementEvents(data.unit_movements ?? []);
+          setCombatEvents(data.combat_results ?? []);
+          updateMetricsFromState(state);
 
-        setActiveScenario((prev) => prev
-          ? {
-            ...prev,
-            units: displayUnits,
-            briefing: data.ai_narrative_output || prev.briefing,
-            title: prev.title.split(' //')[0],
-          }
-          : prev);
+          setActiveScenario((prev) => prev
+            ? {
+              ...prev,
+              units: displayUnits,
+              briefing: data.ai_narrative_output || prev.briefing,
+              title: prev.title.split(' //')[0],
+            }
+            : prev);
+        }
 
         const riskPct = Math.round((data.simulation_results?.expected_risk_operational ?? 0) * 100);
         const successPct = Math.round((data.simulation_results?.expected_success ?? 0) * 100);
 
+        const currentState = data.updated_battlefield_state || battlefieldState;
+
         setAnalysis({
-          strategicOverview: data.ai_narrative_output || `Turn ${state.turn} simulation resolved via backend engine.`,
+          strategicOverview: data.ai_narrative_output || `Turn ${currentState?.turn ?? 0} simulation resolved via backend engine.`,
           staffAnalysis: {
             maneuver: `Movement events: ${data.unit_movements?.length ?? 0}. Combat events: ${data.combat_results?.length ?? 0}.`,
-            logistics: `Friendly alive: ${state.units.filter((u) => u.alive && u.faction === 'FRIENDLY').length}, Enemy alive: ${state.units.filter((u) => u.alive && u.faction === 'ENEMY').length}.`,
+            logistics: `Friendly alive: ${currentState?.units.filter((u) => u.alive && u.faction === 'FRIENDLY').length ?? 0}, Enemy alive: ${currentState?.units.filter((u) => u.alive && u.faction === 'ENEMY').length ?? 0}.`,
             intelligence: `Enemy actions updated from backend simulation.`,
           },
           riskAssessment: `Operational risk estimated at ${riskPct}%.`,
@@ -863,15 +904,25 @@ export default function WarMatrixPage() {
       <main className="flex-1 p-4 flex gap-4 overflow-hidden">
         {/* LEFT ZONE: Intel Widgets */}
         <div className="w-64 flex flex-col gap-4 shrink-0 h-full overflow-y-auto custom-scrollbar pr-2">
-          {/* Sidebar Accordion with all 5 modules */}
-          <SidebarAccordion
-            activeScenario={activeScenario}
-            lastResult={lastResult}
-            loadingAnalysis={loadingAnalysis}
-            analysis={analysis}
-            turn={turn}
-            onMaximizeHandbook={() => setIsHandbookConsoleOpen(true)}
-          />
+          {/* Tactical Dashboard Launcher */}
+          <button
+            suppressHydrationWarning
+            onClick={() => setIsDashboardOpen(true)}
+            className="w-full flex items-center justify-between p-3 rounded-sm group transition-all relative overflow-hidden"
+            style={{
+              background: 'rgba(31,111,235,0.1)',
+              border: '1px solid rgba(31,111,235,0.3)',
+            }}
+          >
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[rgba(31,111,235,0.1)] to-transparent -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-700" />
+            <div className="flex items-center gap-2 relative z-10">
+              <Activity className="w-4 h-4 text-[#3A8DFF]" />
+              <span className="text-[12px] font-bold text-[#E6EDF3] tracking-widest uppercase group-hover:text-[#3A8DFF] transition-colors">
+                Command Dashboard
+              </span>
+            </div>
+            <Maximize2 className="w-3 h-3 text-[#3A8DFF] opacity-50 group-hover:opacity-100 relative z-10" />
+          </button>
 
           <TacticalWidget title="Comm Status" icon={Radio}>
             <div className="flex flex-col gap-1">
@@ -1129,6 +1180,7 @@ export default function WarMatrixPage() {
                 unitHpById={unitHpById}
                 objectiveProgressById={objectiveProgressById}
                 onEndSimulation={handleEndSimulation}
+                onExecuteTurn={() => handleExecuteCommand("Proceed to next turn")}
                 terrainMapData={tacticalTerrainMapData}
                 terrainVersionKey={terrainVersionKey}
               />
@@ -1365,6 +1417,47 @@ export default function WarMatrixPage() {
       />
 
       <div className="fixed inset-0 pointer-events-none z-[60] opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
+      {/* Sidebar Dashboard Modal */}
+      {isDashboardOpen && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-[#02060E]/80 backdrop-blur-md">
+          <div className="w-[90vw] max-w-[800px] h-[85vh] flex flex-col rounded-sm shadow-2xl relative" style={{
+            background: 'linear-gradient(160deg, rgba(8,14,28,0.95) 0%, rgba(10,16,30,0.98) 100%)',
+            border: '1px solid rgba(31,111,235,0.4)',
+          }}>
+            <div className="flex justify-between items-center px-6 py-4 border-b border-[#1F6FEB]/20 bg-[#0A101C]/80 shadow-[0_4px_20px_rgba(31,111,235,0.05)]">
+              <div className="flex items-center gap-3">
+                <Activity className="w-5 h-5 text-[#3A8DFF] animate-pulse" />
+                <h2 className="text-[16px] font-mono font-bold text-[#E6EDF3] tracking-[0.2em] uppercase">
+                  Tactical Command Dashboard
+                </h2>
+              </div>
+              <button
+                onClick={() => setIsDashboardOpen(false)}
+                className="text-[#4B6A8A] hover:text-[#EF4444] transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 warmatrix-scrollbar">
+              <div className="max-w-3xl mx-auto flex flex-col gap-4">
+                <SidebarAccordion
+                  activeScenario={activeScenario}
+                  lastResult={lastResult}
+                  loadingAnalysis={loadingAnalysis}
+                  analysis={analysis}
+                  turn={turn}
+                  onMaximizeHandbook={() => {
+                    setIsDashboardOpen(false);
+                    setIsHandbookConsoleOpen(true);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
