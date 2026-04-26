@@ -1,6 +1,9 @@
+'use client';
+
 import React from 'react';
 import { Courier_Prime } from 'next/font/google';
-import { Cpu, Terminal, Settings2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Cpu, Terminal, Settings2, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const courierNew = Courier_Prime({
@@ -17,6 +20,13 @@ interface HeaderProps {
 }
 
 export function Header({ turn, status, onOpenBuilder, role, onRoleSwitch }: HeaderProps) {
+  const router = useRouter();
+
+  const handleLogout = () => {
+    localStorage.removeItem("warmatrix_auth");
+    router.push('/');
+  };
+
   return (
     <header className="h-14 border-b border-[#1F6FEB]/20 bg-[#0F1115] grid grid-cols-3 items-center px-6 shrink-0 z-50 shadow-2xl">
       {/* LEFT: Logo Section */}
@@ -89,6 +99,17 @@ export function Header({ turn, status, onOpenBuilder, role, onRoleSwitch }: Head
           <Terminal className="w-3.5 h-3.5" />
           <span className="text-[9px] font-mono tracking-tighter uppercase">SEC_UPLINK</span>
         </div>
+
+        <div className="h-5 w-px bg-[#1F6FEB]/20 mx-1" />
+
+        <button 
+           onClick={handleLogout}
+           className="flex items-center gap-1.5 text-[#4B5563] hover:text-[#EF4444] transition-colors group ml-2"
+           title="Terminate Secure Session"
+        >
+           <LogOut className="w-3.5 h-3.5" />
+           <span className="text-[9px] font-bold tracking-[0.1em] uppercase opacity-0 group-hover:opacity-100 transition-opacity w-0 group-hover:w-auto overflow-hidden text-nowrap block">EXTRICATION</span>
+        </button>
       </div>
     </header>
   );

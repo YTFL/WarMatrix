@@ -145,7 +145,7 @@ export async function POST(req: Request) {
             command: raw.command ?? raw.directive ?? 'hold position',
             current_state: raw.current_state,
             end_simulation: raw.end_simulation ?? false,
-            max_new_tokens: clamp(raw.max_new_tokens, 32, 512, 320),
+            max_new_tokens: clamp(raw.max_new_tokens, 32, Number.MAX_SAFE_INTEGER, 512),
             temperature: clamp(raw.temperature, 0.0, 2.0, 0.45),
             top_p: clamp(raw.top_p, 0.1, 1.0, 0.9),
         };
@@ -200,7 +200,7 @@ export async function POST(req: Request) {
     const payload = {
         instruction: buildInstruction(directive || 'Generate a tactical SITREP.', raw.mode),
         battlefield_data: battlefield_data || directive,
-        max_new_tokens: clamp(raw.max_new_tokens, 32, 512, 150),
+        max_new_tokens: clamp(raw.max_new_tokens, 32, Number.MAX_SAFE_INTEGER, 512),
         temperature: clamp(raw.temperature, 0.0, 2.0, 0.45),
         top_p: clamp(raw.top_p, 0.1, 1.0, 0.9),
     };
@@ -217,7 +217,7 @@ export async function POST(req: Request) {
         const data = await res.json();
 
         if (!res.ok) {
-            // Python server is reachable but returned an error (e.g. inference failed)
+            // ... (error handling remains the same)
             return NextResponse.json(
                 {
                     error: 'ai_inference_error',
@@ -225,6 +225,11 @@ export async function POST(req: Request) {
                 },
                 { status: res.status }
             );
+        }
+
+        // Normalize response for frontend consistency
+        if (data.response && !data.ai_narrative_output) {
+            data.ai_narrative_output = data.response;
         }
 
         return NextResponse.json(data, { status: res.status });

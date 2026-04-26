@@ -472,7 +472,7 @@ class BackendHandler(BaseHTTPRequestHandler):
                     return
 
             # Per-request overrides (all optional)
-            max_new_tokens      = max(32, min(int(body.get("max_new_tokens",      DEFAULT_MAX_NEW_TOKENS)),     1024))
+            max_new_tokens      = max(32, int(body.get("max_new_tokens",      DEFAULT_MAX_NEW_TOKENS)))
             temperature         = max(0.0, min(float(body.get("temperature",       DEFAULT_TEMPERATURE)),        2.0))
             top_p               = max(0.1, min(float(body.get("top_p",             DEFAULT_TOP_P)),              1.0))
             repetition_penalty  = max(1.0, min(float(body.get("repetition_penalty", DEFAULT_REPETITION_PENALTY)), 2.0))

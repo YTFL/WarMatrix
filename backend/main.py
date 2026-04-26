@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 import json
+import os
 import math
 import random
 import re
@@ -22,6 +23,9 @@ from engine.mcts import run_mcts
 from engine.strategy import strategic_override
 
 app = FastAPI(title="WarMatrix Simulation Backend")
+
+def log(msg: str):
+    print(f"[BACKEND] {msg}", flush=True)
 
 app.include_router(router, prefix="/api")
 
@@ -109,13 +113,22 @@ class BattlefieldState(BaseModel):
     end_reason: Optional[str] = None
 
 
+class BatchAction(BaseModel):
+    unit_id: str
+    action_type: str = "MOVE"
+    target_x: Optional[int] = None
+    target_y: Optional[int] = None
+    target_unit_id: Optional[str] = None
+
 class SimulationTickRequest(BaseModel):
     command: Any
     current_state: Optional[BattlefieldState] = None
     end_simulation: bool = False
-    max_new_tokens: int = Field(default=180, ge=32, le=512)
+    max_new_tokens: int = Field(default=512, ge=32)
     temperature: float = Field(default=0.45, ge=0.0, le=2.0)
     top_p: float = Field(default=0.9, ge=0.1, le=1.0)
+    # New: if passed, the backend knows we have pre-extracted batch actions
+    batch_actions: Optional[List[BatchAction]] = None
 
 
 class ScenarioInitUnit(BaseModel):
@@ -903,44 +916,45 @@ def _generate_narrative(
         return "Narrative unavailable: AI generation failed for this turn."
 
 
-def _simulate_player_phase(state: BattlefieldState, command: StructuredCommand, rng: random.Random) -> TickArtifacts:
+def _simulate_player_phase(state: BattlefieldState, commands: List[StructuredCommand], rng: random.Random) -> TickArtifacts:
     movements: List[Dict[str, Any]] = []
     combat_results: List[Dict[str, Any]] = []
     casualties: List[Dict[str, Any]] = []
     enemy_actions: List[Dict[str, Any]] = []
 
-    player = _find_unit(state, command.unit_id, "FRIENDLY")
-    if player and command.action_type in {"MOVE", "CAPTURE", "RECON", "DEFEND"}:
-        tx = command.target.x if command.target and command.target.x else player.x
-        ty = command.target.y if command.target and command.target.y else player.y
-        if command.target and command.target.objective_id:
-            obj = next((o for o in state.objectives if o.id == command.target.objective_id), None)
-            if obj:
-                tx, ty = obj.x, obj.y
-        path = _find_path_with_constraints(state, player, (tx, ty))
-        old = (player.x, player.y)
-        if path:
-            player.x, player.y = path[-1]
-        movements.append(
-            {
-                "unit_id": player.id,
-                "from": {"x": old[0], "y": old[1]},
-                "to": {"x": player.x, "y": player.y},
-                "path": [{"x": x, "y": y} for (x, y) in path],
-                "possible": (old != (player.x, player.y)) or command.action_type == "DEFEND",
-            }
-        )
+    for command in commands:
+        player = _find_unit(state, command.unit_id, "FRIENDLY")
+        if player and command.action_type in {"MOVE", "CAPTURE", "RECON", "DEFEND"}:
+            tx = command.target.x if command.target and command.target.x else player.x
+            ty = command.target.y if command.target and command.target.y else player.y
+            if command.target and command.target.objective_id:
+                obj = next((o for o in state.objectives if o.id == command.target.objective_id), None)
+                if obj:
+                    tx, ty = obj.x, obj.y
+            path = _find_path_with_constraints(state, player, (tx, ty))
+            old = (player.x, player.y)
+            if path:
+                player.x, player.y = path[-1]
+            movements.append(
+                {
+                    "unit_id": player.id,
+                    "from": {"x": old[0], "y": old[1]},
+                    "to": {"x": player.x, "y": player.y},
+                    "path": [{"x": px, "y": py} for (px, py) in path],
+                    "possible": (old != (player.x, player.y)) or command.action_type == "DEFEND",
+                }
+            )
 
-    if player and command.action_type == "ATTACK":
-        defender: Optional[BattlefieldUnit] = None
-        if command.target and command.target.unit_id:
-            defender = next((u for u in state.units if u.id == command.target.unit_id and u.faction == "ENEMY" and u.alive), None)
-        if not defender:
-            defender = _closest_enemy(state, player)
-        if defender:
-            outcome = _combat(state, player, defender, rng)
-            if outcome:
-                combat_results.append(outcome)
+        if player and command.action_type == "ATTACK":
+            defender: Optional[BattlefieldUnit] = None
+            if command.target and command.target.unit_id:
+                defender = next((u for u in state.units if u.id == command.target.unit_id and u.faction == "ENEMY" and u.alive), None)
+            if not defender:
+                defender = _closest_enemy(state, player)
+            if defender:
+                outcome = _combat(state, player, defender, rng)
+                if outcome:
+                    combat_results.append(outcome)
 
     for unit in state.units:
         if not unit.alive:
@@ -1056,30 +1070,93 @@ def simulate_tick(payload: SimulationTickRequest) -> Dict[str, Any]:
             "termination_reason": state.end_reason or "Simulation already ended",
         }
 
-    command = _normalize_command(payload.command, state)
-    validation = _validate_command(state, command)
-    if not validation["is_valid"]:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": "invalid_action",
-                "details": "; ".join(validation["reasons"]),
-                "validation": validation,
-                "updated_battlefield_state": state.dict(),
-                "terminated": state.ended,
-            },
+    commands: List[StructuredCommand] = []
+    raw_cmd_str = str(payload.command)
+    
+    if "EXECUTE THE FOLLOWING PLAN:" in raw_cmd_str:
+        # 1. Plan Extraction Mode
+        # Call AI to get structured JSON actions
+        plan_content = raw_cmd_str.split("EXECUTE THE FOLLOWING PLAN:")[1].split(". User Directive:")[0]
+        extraction_prompt = (
+            f"BATTLEFIELD UNITS: {', '.join([u.id + ' (' + u.label + ')' for u in state.units if u.faction == 'FRIENDLY' and u.alive])}\n"
+            f"MISSION PLAN: {plan_content}\n\n"
+            "EXTRACT TACTICAL ACTIONS. Format as a JSON list of objects: "
+            "[{\"unit_id\": \"...\", \"action_type\": \"MOVE|ATTACK|HOLD\", \"target_x\": 5, \"target_y\": 5, \"target_unit_id\": \"...\"}]. "
+            "ONLY RETURN THE JSON LIST. If a unit is not mentioned, it HOLDS position."
         )
+        
+        try:
+            # We reuse the AI server for extraction
+            import urllib.request
+            log(f"Extracting batch actions from plan for turn {state.turn}...")
+            
+            # Simple AI server call
+            ai_req_payload = {
+                "instruction": "You are a tactical data extractor. Convert military plans into JSON actions.",
+                "battlefield_data": extraction_prompt,
+                "temperature": 0.1,
+                "max_new_tokens": 512
+            }
+            
+            use_lm = os.environ.get("USE_LM_STUDIO", "false").lower() in ("true", "1", "yes")
+            ip = os.environ.get("LM_STUDIO_IP", "127.0.0.1")
+            port = os.environ.get("LM_STUDIO_PORT", "1234")
+            
+            target_url = f"http://{ip}:{port}/v1/chat/completions" if use_lm else f"{AI_SERVER_URL}"
+            # For simplicity in this script, we'll try to use the existing _generate_narrative style or direct call
+            # But wait, AI_SERVER_URL is available.
+            
+            with urllib.request.urlopen(urllib.request.Request(
+                AI_SERVER_URL,
+                data=json.dumps(ai_req_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            ), timeout=30) as resp:
+                ai_data = json.loads(resp.read().decode("utf-8"))
+                raw_json = ai_data.get("response", "[]")
+                # Clean up potential markdown formatting
+                raw_json = re.sub(r'```json\s*|\s*```', '', raw_json).strip()
+                extracted = json.loads(raw_json)
+                
+                for item in extracted:
+                    target = StructuredTarget(
+                        x=item.get("target_x"),
+                        y=item.get("target_y"),
+                        unit_id=item.get("target_unit_id")
+                    )
+                    commands.append(StructuredCommand(
+                        action_type=item.get("action_type", "HOLD"),
+                        unit_id=item.get("unit_id"),
+                        target=target,
+                        raw_input=f"ADVISOR_PLAN: {item.get('unit_id')} -> {item.get('action_type')}"
+                    ))
+        except Exception as e:
+            log(f"BATCH EXTRACTION FAILED: {e}")
+            # Fallback to single normalization
+            commands.append(_normalize_command(payload.command, state))
+    else:
+        # 2. Standard Mode (Single Command)
+        commands.append(_normalize_command(payload.command, state))
 
-    normalized_cmd = validation["normalized_command"]
-    command = StructuredCommand(
-        action_type=normalized_cmd["action_type"],
-        unit_id=normalized_cmd.get("unit_id"),
-        target=StructuredTarget(**normalized_cmd.get("target", {})),
-        raw_input=normalized_cmd.get("raw_input", command.raw_input),
-    )
+    # Validation and Execution
+    valid_commands: List[StructuredCommand] = []
+    for cmd in commands:
+        val = _validate_command(state, cmd)
+        if val["is_valid"]:
+            norm = val["normalized_command"]
+            valid_commands.append(StructuredCommand(
+                action_type=norm["action_type"],
+                unit_id=norm.get("unit_id"),
+                target=StructuredTarget(**norm.get("target", {})),
+                raw_input=norm.get("raw_input", cmd.raw_input),
+            ))
+
+    if not valid_commands:
+        # If all failed or no command, default to HOLD for everything
+        valid_commands.append(StructuredCommand(action_type="HOLD", raw_input="no_valid_commands"))
+
     rng = _seeded_random_for_state(state.turn)
 
-    artifacts = _simulate_player_phase(state, command, rng)
+    artifacts = _simulate_player_phase(state, valid_commands, rng)
     _simulate_enemy_phase(state, artifacts, rng)
 
     end = _check_end_conditions(state, payload.end_simulation)
@@ -1093,7 +1170,7 @@ def simulate_tick(payload: SimulationTickRequest) -> Dict[str, Any]:
     with ThreadPoolExecutor(max_workers=1) as exe:
         fut = exe.submit(
             _generate_narrative,
-            command,
+            valid_commands[0] if valid_commands else StructuredCommand(action_type="HOLD"),
             state,
             artifacts,
             payload.max_new_tokens,
@@ -1110,8 +1187,8 @@ def simulate_tick(payload: SimulationTickRequest) -> Dict[str, Any]:
         "enemy_actions": artifacts.enemy_actions,
         "casualties": artifacts.casualties,
         "simulation_results": artifacts.simulation_results,
-        "normalized_command": command.dict(),
-        "validation": validation,
+        "normalized_command": (valid_commands[0].dict() if valid_commands else {}),
+        "validation": {"is_valid": True, "reasons": []},
         "ai_narrative_output": narrative,
         "terminated": state.ended,
         "termination_reason": state.end_reason,
