@@ -24,6 +24,7 @@ export function Header({ turn, status, onOpenBuilder, role, onRoleSwitch }: Head
 
   const handleLogout = () => {
     localStorage.removeItem("warmatrix_auth");
+    localStorage.removeItem("warmatrix_auth_expires");
     router.push('/');
   };
 
