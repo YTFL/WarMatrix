@@ -326,7 +326,12 @@ export default function WarMatrixPage() {
   // ─── Authentication Guard ──────────────────────────────────────────────────
   useEffect(() => {
     const isAuth = localStorage.getItem("warmatrix_auth") === "true";
-    if (!isAuth) {
+    const expires = localStorage.getItem("warmatrix_auth_expires");
+    const isExpired = expires ? parseInt(expires, 10) < Date.now() : true;
+
+    if (!isAuth || isExpired) {
+      localStorage.removeItem("warmatrix_auth");
+      localStorage.removeItem("warmatrix_auth_expires");
       router.push("/login"); // Emergency redirect to Authorization Portal
     }
   }, [router]);
