@@ -178,7 +178,7 @@ export default function LoginPage() {
     
     // Step 1: Uplinking (2 seconds)
     const uplinkInterval = setInterval(() => {
-      p += 5;
+      p += 10;
       setProgress(p);
       if (p >= 100) {
         clearInterval(uplinkInterval);
@@ -188,7 +188,7 @@ export default function LoginPage() {
         
         // Step 2: Decrypting (2 seconds)
         const decryptInterval = setInterval(() => {
-          p += 5;
+          p += 10;
           setProgress(p);
           if (p >= 100) {
             clearInterval(decryptInterval);
@@ -198,35 +198,42 @@ export default function LoginPage() {
             
             // Step 3: Syncing Nodes (2 seconds)
             const syncInterval = setInterval(() => {
-              p += 5;
+              p += 10;
               setProgress(p);
               if (p >= 100) {
                 clearInterval(syncInterval);
-                setStatus("SCANNING");
+                // NEW: Firewall Handshake Step
+                setStatus("SCANNING"); 
                 p = 0;
                 setProgress(0);
                 
-                // Step 4: Scanning (2 seconds)
+                // Step 4: Scanning / Firewall Handshake
                 const scanInterval = setInterval(() => {
-                  p += 5;
+                  p += 10;
                   setProgress(p);
                   if (p >= 100) {
                     clearInterval(scanInterval);
                     setStatus("VERIFYING");
                     setTimeout(() => {
                       setStatus("SUCCESS");
+                      
+                      // Stronger Security: Set both localStorage AND cookie for Middleware
                       localStorage.setItem("warmatrix_auth", "true");
-                      localStorage.setItem("warmatrix_auth_expires", (Date.now() + 1000 * 60 * 60 * 24).toString()); // Expires in 24 hours
-                      setTimeout(() => router.push("/console"), 800);
-                    }, 1000);
+                      localStorage.setItem("warmatrix_auth_expires", (Date.now() + 1000 * 60 * 60 * 24).toString());
+                      
+                      // Set session cookie for Middleware wall
+                      document.cookie = "warmatrix_token=valid_session_token; path=/; max-age=86400; SameSite=Strict";
+                      
+                      setTimeout(() => router.push("/console"), 600);
+                    }, 800);
                   }
-                }, 100);
+                }, 80);
               }
-            }, 100);
+            }, 80);
           }
-        }, 100);
+        }, 80);
       }
-    }, 100);
+    }, 80);
   };
 
   return (

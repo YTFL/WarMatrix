@@ -14,6 +14,7 @@ import { TacticalTerrainMapData, TacticalTeam, buildTerrainGridFromPeaks } from 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { TacticalHandbookConsole } from '@/components/TacticalHandbookConsole';
+import { FirewallSentry } from '@/components/FirewallSentry';
 import {
   Activity,
   CloudRain,
@@ -323,18 +324,23 @@ export default function WarMatrixPage() {
   const [analysis, setAnalysis] = useState<any>(null);
   const [role, setRole] = useState<'BLUE_TEAM' | 'RED_TEAM'>('BLUE_TEAM');
 
-  // ─── Authentication Guard ──────────────────────────────────────────────────
+  // ─── STRENGTHENED FIREWALL GUARD ──────────────────────────────────────────
   useEffect(() => {
     const isAuth = localStorage.getItem("warmatrix_auth") === "true";
     const expires = localStorage.getItem("warmatrix_auth_expires");
     const isExpired = expires ? parseInt(expires, 10) < Date.now() : true;
+    
+    // Check for firewall token cookie
+    const hasFirewallToken = document.cookie.includes("warmatrix_token=");
 
-    if (!isAuth || isExpired) {
+    if (!isAuth || isExpired || !hasFirewallToken) {
+      console.log("[SECURITY] Unauthorized access blocked by Firewall Sentry.");
       localStorage.removeItem("warmatrix_auth");
       localStorage.removeItem("warmatrix_auth_expires");
       router.push("/login"); // Emergency redirect to Authorization Portal
     }
   }, [router]);
+  // ─── FIREWALL GUARD END ──────────────────────────────────────────────────
   const [centerScenarioMode, setCenterScenarioMode] = useState<'default' | 'random' | 'custom'>('default');
   const [isBuilderWorkspaceActive, setIsBuilderWorkspaceActive] = useState(false);
   const [builderScenarioMode, setBuilderScenarioMode] = useState<'selection' | 'random' | 'custom'>('selection');
@@ -909,6 +915,9 @@ export default function WarMatrixPage() {
       <main className="flex-1 p-4 flex gap-4 overflow-hidden">
         {/* LEFT ZONE: Intel Widgets */}
         <div className="w-64 flex flex-col gap-4 shrink-0 h-full overflow-y-auto custom-scrollbar pr-2">
+          {/* Security Wall / Firewall Sentry */}
+          <FirewallSentry />
+
           {/* Tactical Dashboard Launcher */}
           <button
             suppressHydrationWarning
