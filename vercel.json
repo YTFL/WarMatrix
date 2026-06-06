@@ -6,7 +6,10 @@
         },
         "backend": {
             "root": "backend",
-            "routePrefix": "/_/backend"
+            "routePrefix": "/_/backend",
+            "entrypoint": "main.py",
+            "builder": "@vercel/python",
+            "runtime": "python3.9"
         }
     }
 }
