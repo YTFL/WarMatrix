@@ -6,10 +6,9 @@
         },
         "backend": {
             "root": "backend",
-            "routePrefix": "/_/backend",
             "entrypoint": "main.py",
-            "builder": "@vercel/python",
-            "runtime": "python3.12"
+            "routePrefix": "/_/backend",
+            "framework": "fastapi"
         }
     }
 }
