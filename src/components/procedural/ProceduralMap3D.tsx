@@ -13,7 +13,6 @@ interface ProceduralMap3DProps {
     roads: boolean;
     districts: boolean;
     buildings: boolean;
-    infrastructure: boolean;
     metadata: boolean;
   };
 }
@@ -267,30 +266,7 @@ export function ProceduralMap3D({ mapData, activeLayers }: ProceduralMap3DProps)
             );
           })}
 
-        {/* 3D Strategic Infrastructure layer */}
-        {activeLayers.infrastructure &&
-          mapData.infrastructure.map((inf) => {
-            const [wx, wy] = gridToWorld(inf.x, inf.y, cols, rows);
-            const assetPath = getGLBPath(inf.asset_key);
 
-            return (
-              <group key={inf.id} position={[wx, wy, 0]}>
-                {/* Strategic point base marker */}
-                <mesh position={[0, 0, 0.03]}>
-                  <ringGeometry args={[1.5, 1.8, 6]} />
-                  <meshBasicMaterial color="#00e5ff" transparent opacity={0.6} side={THREE.DoubleSide} />
-                </mesh>
-                
-                <AssetInstance
-                  path={assetPath}
-                  position={[0, 0, 0]}
-                  rotation={inf.rotation}
-                  height={3}
-                  color="#00e5ff"
-                />
-              </group>
-            );
-          })}
 
         {/* Orbit Controls */}
         <OrbitControls
