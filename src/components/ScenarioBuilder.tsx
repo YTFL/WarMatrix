@@ -258,8 +258,8 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
     // ── Terminal log: AI call ──
     setAiStatus('generating');
     pushLog('INFO', '─'.repeat(44));
-    pushLog('PROC', 'Sending request → Local Fine-Tuned Qwen3.5-4B');
-    pushLog('PROC', 'Awaiting local model inference...');
+    pushLog('PROC', 'Sending request to models...');
+    pushLog('PROC', 'Awaiting model inference...');
 
     const t0 = Date.now();
     try {
