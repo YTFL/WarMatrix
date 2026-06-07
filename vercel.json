@@ -11,11 +11,6 @@
       "framework": "fastapi"
     }
   },
-  "security": {
-    "deploymentProtection": {
-      "protectionMode": "standard"
-    }
-  },
   "routes": [
     {
       "src": "/_/backend/(.*)",
