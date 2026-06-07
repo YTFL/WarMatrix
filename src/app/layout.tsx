@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -20,6 +22,8 @@ export default function RootLayout({
       </head>
       <body suppressHydrationWarning className="font-body antialiased bg-[#0A0F1C] text-[#E5E7EB] h-screen overflow-hidden custom-scrollbar">
         {children}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
