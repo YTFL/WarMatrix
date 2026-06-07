@@ -6,6 +6,9 @@ import {
     buildTerrainGridFromPeaks,
 } from '@/lib/tacticalTerrain';
 
+const isVercel = process.env.VERCEL === 'true';
+const apiBaseUrl = isVercel ? '/api' : 'http://localhost:8000/api';
+
 // ── Input ─────────────────────────────────────────────────────────────────────
 
 const GenerateScenarioInputSchema = z.object({
@@ -315,7 +318,7 @@ OBJS: ${input.objectiveType}
 
 GENERATE RAW JSON SECURE DICTIONARY:`;
 
-    const res = await fetch('http://127.0.0.1:8000/api/sitrep', {
+    const res = await fetch(`${apiBaseUrl}/sitrep`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
