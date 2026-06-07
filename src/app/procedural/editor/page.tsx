@@ -71,6 +71,10 @@ interface PlacedAsset {
   posZOffset: number;
   category: string;
   subIndex: number; // child index to render, -1 means show all
+  fpLeft: number;   // extend footprint left (negative = shrink)
+  fpRight: number;  // extend footprint right
+  fpTop: number;    // extend footprint up
+  fpBottom: number; // extend footprint down
 }
 
 // ─── Holographic Editor GLB Component ────────────────────────────────────────
@@ -181,7 +185,7 @@ function EditorAssetOccupiedHighlight({
   wy: number;
 }) {
   const { scene } = useGLTF(asset.assetPath);
-  
+
   const occupiedCells = useMemo(() => {
     if (!scene) return [];
     const subIndex = asset.subIndex;
@@ -195,9 +199,8 @@ function EditorAssetOccupiedHighlight({
     childrenToMeasure.forEach((child) => {
       tempGroup.add(child.clone());
     });
-    
+
     const box = new THREE.Box3().setFromObject(tempGroup);
-    
     const min = box.min;
     const max = box.max;
     const localCorners = [
@@ -210,51 +213,39 @@ function EditorAssetOccupiedHighlight({
       new THREE.Vector3(max.x, max.y, min.z),
       new THREE.Vector3(max.x, max.y, max.z),
     ];
-    
+
     const rad = (asset.rotation * Math.PI) / 180;
     const cos_yaw = Math.cos(rad);
     const sin_yaw = Math.sin(rad);
-    
+
     const worldCorners = localCorners.map((corner) => {
-      // 1. Primitive rotation [Math.PI / 2, 0, 0]
       const x1 = corner.x;
       const y1 = -corner.z;
       const z1 = corner.y;
-      
-      // 2. Scale
       const x2 = x1 * asset.scaleX;
       const y2 = y1 * asset.scaleY;
-      const z2 = z1 * asset.scaleZ;
-      
-      // 3. Rotation around Z
       const x3 = x2 * cos_yaw - y2 * sin_yaw;
       const y3 = x2 * sin_yaw + y2 * cos_yaw;
-      const z3 = z2;
-      
-      // 4. Micro Position Offsets
-      const x4 = x3 + asset.posXOffset;
-      const y4 = y3 + asset.posYOffset;
-      const z4 = z3 + asset.posZOffset;
-      
-      // 5. Grid placement center
       return {
-        x: x4 + wx,
-        y: y4 + wy
+        x: x3 + asset.posXOffset + wx,
+        y: y3 + asset.posYOffset + wy
       };
     });
-    
+
     const xs = worldCorners.map(c => c.x);
     const ys = worldCorners.map(c => c.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    
-    const minGCol = Math.floor(minX / WORLD_SCALE + GRID_COLS / 2);
-    const maxGCol = Math.floor(maxX / WORLD_SCALE + GRID_COLS / 2);
-    const minGRow = Math.floor(GRID_ROWS / 2 - maxY / WORLD_SCALE);
-    const maxGRow = Math.floor(GRID_ROWS / 2 - minY / WORLD_SCALE);
-    
+
+    let minGCol = Math.floor(Math.min(...xs) / WORLD_SCALE + GRID_COLS / 2);
+    let maxGCol = Math.floor(Math.max(...xs) / WORLD_SCALE + GRID_COLS / 2);
+    let minGRow = Math.floor(GRID_ROWS / 2 - Math.max(...ys) / WORLD_SCALE);
+    let maxGRow = Math.floor(GRID_ROWS / 2 - Math.min(...ys) / WORLD_SCALE);
+
+    // Apply directional overrides
+    minGCol -= (asset.fpLeft || 0);
+    maxGCol += (asset.fpRight || 0);
+    minGRow -= (asset.fpTop || 0);
+    maxGRow += (asset.fpBottom || 0);
+
     const cells: { x: number; y: number }[] = [];
     for (let c = Math.max(0, minGCol); c <= Math.min(GRID_COLS - 1, maxGCol); c++) {
       for (let r = Math.max(0, minGRow); r <= Math.min(GRID_ROWS - 1, maxGRow); r++) {
@@ -263,7 +254,7 @@ function EditorAssetOccupiedHighlight({
       }
     }
     return cells;
-  }, [scene, asset.x, asset.y, asset.scaleX, asset.scaleY, asset.scaleZ, asset.rotation, asset.posXOffset, asset.posYOffset, asset.posZOffset, asset.subIndex, wx, wy]);
+  }, [scene, asset.x, asset.y, asset.scaleX, asset.scaleY, asset.scaleZ, asset.rotation, asset.posXOffset, asset.posYOffset, asset.posZOffset, asset.subIndex, asset.fpLeft, asset.fpRight, asset.fpTop, asset.fpBottom, wx, wy]);
 
   return (
     <>
@@ -297,16 +288,16 @@ function EditorAssetInstance({
   isSelected: boolean;
   onClick: (e: any) => void;
 }) {
-  const HOLOGRAM_SHADES: Record<string, string> = {
-    Residential: '#00e5ff',  // Bright cyan
-    Commercial:  '#40c4ff',  // Sky blue
-    Industrial:  '#00bcd4',  // Teal cyan
-    Government:  '#80d8ff',  // Ice blue
-    Military:    '#18ffff',  // Electric aqua
-    Outskirts:   '#4dd0e1',  // Muted teal
-    Local:       '#26c6da',  // Soft cyan
+  const STRUCTURE_COLORS: Record<string, string> = {
+    residential:  '#10B981',  // Emerald green
+    commercial:   '#EC4899',  // Magenta pink
+    industrial:   '#EF4444',  // Red
+    office:       '#8B5CF6',  // Violet purple
+    landmark:     '#FACC15',  // Golden yellow
+    comms_radar:  '#3B82F6',  // Strategic blue
+    bridge:       '#14B8A6',  // Teal
   };
-  const color = HOLOGRAM_SHADES[asset.category] || '#00e5ff';
+  const color = STRUCTURE_COLORS[asset.category.toLowerCase()] || '#00e5ff';
   const [wx, wy] = editorGridToWorld(asset.x, asset.y);
 
   return (
@@ -582,7 +573,11 @@ export default function AssetScaleEditorPage() {
         posYOffset: defaultScale.positionOffset?.[1] || 0,
         posZOffset: defaultScale.positionOffset?.[2] || 0,
         category: activeBrush.category,
-        subIndex: defaultScale.subIndex !== undefined ? defaultScale.subIndex : -1
+        subIndex: defaultScale.subIndex !== undefined ? defaultScale.subIndex : -1,
+        fpLeft: 0,
+        fpRight: 0,
+        fpTop: 0,
+        fpBottom: 0
       };
 
       setPlacedAssets((prev) => {
@@ -687,7 +682,11 @@ export default function AssetScaleEditorPage() {
           parseFloat(asset.posYOffset.toFixed(3)),
           parseFloat(asset.posZOffset.toFixed(3))
         ],
-        subIndex: asset.subIndex
+        subIndex: asset.subIndex,
+        fpLeft: asset.fpLeft,
+        fpRight: asset.fpRight,
+        fpTop: asset.fpTop,
+        fpBottom: asset.fpBottom
       };
     });
 
@@ -706,7 +705,11 @@ export default function AssetScaleEditorPage() {
         posYOffset: a.posYOffset,
         posZOffset: a.posZOffset,
         category: a.category,
-        subIndex: a.subIndex
+        subIndex: a.subIndex,
+        fpLeft: a.fpLeft,
+        fpRight: a.fpRight,
+        fpTop: a.fpTop,
+        fpBottom: a.fpBottom
       }))
     };
 
@@ -738,7 +741,11 @@ export default function AssetScaleEditorPage() {
           posYOffset: a.posYOffset ?? 0,
           posZOffset: a.posZOffset ?? 0,
           category: a.category || 'residential',
-          subIndex: a.subIndex !== undefined ? a.subIndex : -1
+          subIndex: a.subIndex !== undefined ? a.subIndex : -1,
+          fpLeft: a.fpLeft ?? 0,
+          fpRight: a.fpRight ?? 0,
+          fpTop: a.fpTop ?? 0,
+          fpBottom: a.fpBottom ?? 0
         }));
         setPlacedAssets(restored);
         if (restored.length > 0) {
@@ -916,7 +923,7 @@ export default function AssetScaleEditorPage() {
                               setActiveBrush({
                                 path: asset.path,
                                 name: asset.name,
-                                category: catKey === 'comms_radar' ? 'Government' : (catKey === 'bridge' ? 'Local' : catKey.charAt(0).toUpperCase() + catKey.slice(1))
+                                category: catKey
                               });
                               setEditorMode('place');
                             }}
@@ -1582,6 +1589,54 @@ export default function AssetScaleEditorPage() {
                     * Z-Offset shifts the asset up or down from its grid anchor.
                   </p>
                 </div>
+              </div>
+              {/* Grid Footprint Override */}
+              <div className="flex flex-col gap-3.5 border-t border-[#1F6FEB]/10 pt-3">
+                <span className="text-[10px] text-[#9CA3AF] uppercase font-bold tracking-wider">
+                  Footprint Adjust (Extend / Shrink)
+                </span>
+                <p className="text-[9px] text-[#8c9bab]/70 italic leading-normal -mt-1">
+                  * Auto-calculated from bounding box. Use these to extend (+) or shrink (-) each edge.
+                </p>
+
+                {([
+                  { key: 'fpLeft' as const, label: '← Left' },
+                  { key: 'fpRight' as const, label: '→ Right' },
+                  { key: 'fpTop' as const, label: '↑ Up' },
+                  { key: 'fpBottom' as const, label: '↓ Down' },
+                ] as const).map(({ key, label }) => (
+                  <div key={key} className="flex flex-col gap-1">
+                    <div className="flex justify-between text-[11px] font-mono">
+                      <span className="text-gray-400">{label}</span>
+                      <span className={`font-bold ${selectedAsset[key] > 0 ? 'text-[#10B981]' : selectedAsset[key] < 0 ? 'text-[#EF4444]' : 'text-[#00e5ff]'}`}>
+                        {selectedAsset[key] > 0 ? '+' : ''}{selectedAsset[key]}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => updateSelectedAsset({ [key]: Math.max(-10, selectedAsset[key] - 1) })}
+                        className="w-6 h-6 flex items-center justify-center bg-[#02050A] border border-[#1F6FEB]/30 hover:border-[#00e5ff] rounded text-[10px] text-gray-400 hover:text-white transition-colors cursor-pointer font-bold select-none shrink-0"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="range"
+                        min="-10"
+                        max="30"
+                        step="1"
+                        value={selectedAsset[key]}
+                        onChange={(e) => updateSelectedAsset({ [key]: parseInt(e.target.value) })}
+                        className="flex-1 accent-[#00e5ff] bg-gray-800 h-1.5 cursor-pointer"
+                      />
+                      <button
+                        onClick={() => updateSelectedAsset({ [key]: Math.min(30, selectedAsset[key] + 1) })}
+                        className="w-6 h-6 flex items-center justify-center bg-[#02050A] border border-[#1F6FEB]/30 hover:border-[#00e5ff] rounded text-[10px] text-gray-400 hover:text-white transition-colors cursor-pointer font-bold select-none shrink-0"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               {/* Quick actions */}
