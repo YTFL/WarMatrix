@@ -1,14 +1,26 @@
 {
-    "experimentalServices": {
-        "frontend": {
-            "routePrefix": "/",
-            "framework": "nextjs"
-        },
-        "backend": {
-            "root": "backend",
-            "entrypoint": "main.py",
-            "routePrefix": "/_/backend",
-            "framework": "fastapi"
-        }
+  "experimentalServices": {
+    "frontend": {
+      "routePrefix": "/",
+      "framework": "nextjs"
+    },
+    "backend": {
+      "root": "backend",
+      "entrypoint": "main.py",
+      "routePrefix": "/_/backend",
+      "framework": "fastapi"
     }
+  },
+  "security": {
+    "deploymentProtection": {
+      "protectionMode": "standard"
+    }
+  },
+  "routes": [
+    {
+      "src": "/_/backend/(.*)",
+      "dest": "/_/backend/$1",
+      "continue": true
+    }
+  ]
 }
