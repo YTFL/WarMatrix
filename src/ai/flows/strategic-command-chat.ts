@@ -1,9 +1,12 @@
 import { z } from 'zod';
 
-const isVercel = process.env.VERCEL === 'true';
-const apiBaseUrl = isVercel
-    ? '/api'
-    : 'http://localhost:8000/api';
+const BACKEND_ROUTE_PREFIX = '/_/backend';
+
+const apiBaseUrl = typeof window === 'undefined'
+    ? process.env.NEXT_PUBLIC_API_URL
+        ? `${process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '')}${BACKEND_ROUTE_PREFIX}/api`
+        : `http://localhost:8000${BACKEND_ROUTE_PREFIX}/api`
+    : `${BACKEND_ROUTE_PREFIX}/api`;
 
 // ─── Input / Output Schemas ───────────────────────────────────────────────────
 
