@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router as api_router
+from api.procedural.routes import router as procedural_router
 
 app = FastAPI(title="WarMatrix Backend Engine")
 
@@ -15,6 +16,7 @@ app.add_middleware(
 
 # Include the simulation routes
 app.include_router(api_router, prefix="/api")
+app.include_router(procedural_router, prefix="/api/procedural")
 
 @app.get("/health")
 def health_check():
