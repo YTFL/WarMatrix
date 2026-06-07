@@ -1,10 +1,13 @@
+import { cookies, headers } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { GEMINI_API_KEY_COOKIE } from '@/lib/gemini-auth';
 
 const AI_SERVER_BASE = process.env.AI_SERVER_BASE_URL ?? 'http://127.0.0.1:8000';
 const SIM_SERVER_BASE = process.env.SIM_SERVER_BASE_URL ?? 'http://127.0.0.1:8001';
 const INFERENCE_TIMEOUT_MS = 300_000; // 5 min — CPU inference can be slow
 const HEALTH_TIMEOUT_MS = 5_000;     // 5 s  — quick ping only
 const SIM_TIMEOUT_MS = 120_000;
+const GEMINI_KEY_REQUIRED = process.env.USE_GEMINI_KEY === 'true';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,9 +62,43 @@ function clamp(val: number | undefined, min: number, max: number, def: number): 
     return Math.max(min, Math.min(max, Number(val)));
 }
 
+async function getGeminiApiKey(): Promise<string> {
+    const cookieStore = await cookies();
+    return cookieStore.get(GEMINI_API_KEY_COOKIE)?.value?.trim() ?? '';
+}
+
+async function requireGeminiApiKey() {
+    const headersList = await headers();
+    const host = headersList.get('host') || '';
+    const isVercel = host.split(':')[0].endsWith('.vercel.app');
+    const isKeyRequired = GEMINI_KEY_REQUIRED || isVercel;
+
+    if (!isKeyRequired) {
+        return null;
+    }
+
+    const geminiApiKey = await getGeminiApiKey();
+    if (geminiApiKey) {
+        return null;
+    }
+
+    return NextResponse.json(
+        {
+            error: 'gemini_key_required',
+            details: 'A Gemini API key must be entered at /login before using this deployment.',
+        },
+        { status: 401 }
+    );
+}
+
 // ─── GET  /api/sitrep  (health check proxy) ───────────────────────────────────
 
 export async function GET() {
+    const keyError = await requireGeminiApiKey();
+    if (keyError) {
+        return keyError;
+    }
+
     try {
         const res = await fetch(`${AI_SERVER_BASE}/health`, {
             signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
@@ -91,6 +128,13 @@ function isScenarioInitializationRequest(raw: SitrepRequestBody): boolean {
 }
 
 export async function POST(req: Request) {
+    const keyError = await requireGeminiApiKey();
+    if (keyError) {
+        return keyError;
+    }
+
+    const geminiApiKey = await getGeminiApiKey();
+
     // 1. Parse incoming body
     let raw: SitrepRequestBody;
     try {
@@ -108,7 +152,10 @@ export async function POST(req: Request) {
         try {
             const res = await fetch(`${SIM_SERVER_BASE}/api/initialize_scenario`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-gemini-api-key': geminiApiKey,
+                },
                 body: JSON.stringify(payload),
                 signal: AbortSignal.timeout(SIM_TIMEOUT_MS),
             });
@@ -153,7 +200,10 @@ export async function POST(req: Request) {
         try {
             const res = await fetch(`${SIM_SERVER_BASE}/api/simulate_tick`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-gemini-api-key': geminiApiKey,
+                },
                 body: JSON.stringify(payload),
                 signal: AbortSignal.timeout(SIM_TIMEOUT_MS),
             });
@@ -209,7 +259,10 @@ export async function POST(req: Request) {
     try {
         const res = await fetch(`${AI_SERVER_BASE}/api/sitrep`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'x-gemini-api-key': geminiApiKey,
+            },
             body: JSON.stringify(payload),
             signal: AbortSignal.timeout(INFERENCE_TIMEOUT_MS),
         });

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -120,9 +121,9 @@ startProcess({
     ...process.env,
     HF_TOKEN: process.env.HF_TOKEN,
     USE_LM_STUDIO: process.env.USE_LM_STUDIO || 'true', // 'true' or 'false'
-    LM_STUDIO_IP: process.env.LM_STUDIO_IP || '192.168.144.11',
+    LM_STUDIO_IP: process.env.LM_STUDIO_IP || 'localhost',
     LM_STUDIO_PORT: process.env.LM_STUDIO_PORT || '1234',
-    LM_STUDIO_API_KEY: process.env.LM_STUDIO_API_KEY || 'Bearer sk-lm-qhGzqyKj:68LU2MiNCZJ1oTKgBtKP',
+    LM_STUDIO_API_KEY: process.env.LM_STUDIO_API_KEY || '',
     MODEL_PATH: path.join('wargaming_llm', 'wargame_final_outputs', 'checkpoint-125'),
     LOAD_IN_4BIT: 'true',
     USE_8BIT: 'false',

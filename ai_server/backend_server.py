@@ -29,6 +29,41 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+# ─── Load Environment ─────────────────────────────────────────────────────────
+
+def load_env() -> None:
+    server_dir = Path(__file__).resolve().parent
+    candidates = [
+        server_dir / ".env",
+        server_dir.parent / ".env",
+        Path.cwd() / ".env",
+    ]
+    seen = set()
+    for path in candidates:
+        abs_path = path.resolve()
+        if abs_path in seen:
+            continue
+        seen.add(abs_path)
+        if abs_path.is_file():
+            try:
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "=" in line:
+                            key, val = line.split("=", 1)
+                            key = key.strip()
+                            val = val.strip()
+                            if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                                val = val[1:-1]
+                            if key not in os.environ:
+                                os.environ[key] = val
+            except Exception as exc:
+                print(f"Error loading environment file {abs_path}: {exc}", flush=True)
+
+load_env()
+
 # ─── Config ───────────────────────────────────────────────────────────────────
 
 HOST                       = "0.0.0.0"
@@ -388,11 +423,17 @@ class BackendHandler(BaseHTTPRequestHandler):
 
         if path == "/health":
             log(f"Health check from {self.client_address[0]}")
+            use_lm_studio = os.environ.get("USE_LM_STUDIO", "false").lower() in ("true", "1", "yes")
+            ip = os.environ.get("LM_STUDIO_IP", "localhost")
+            port = os.environ.get("LM_STUDIO_PORT", "1234")
+            lm_studio_url = f"http://{ip}:{port}" if use_lm_studio else None
             self._send_json(200, {
                 "ok": True,
                 "service": "wargaming-backend",
-                "model_loaded": _model is not None,
-                "model_path": str(_resolved_model_path or MODEL_PATH),
+                "use_lm_studio": use_lm_studio,
+                "lm_studio_url": lm_studio_url,
+                "model_loaded": _model is not None or use_lm_studio,
+                "model_path": lm_studio_url if use_lm_studio else str(_resolved_model_path or MODEL_PATH),
                 "device": "cuda" if torch.cuda.is_available() else "cpu",
             })
             return

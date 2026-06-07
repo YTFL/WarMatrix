@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Shield, Lock, Terminal, Fingerprint, ChevronRight, Activity, Cpu, Globe, Wifi } from "lucide-react";
+import { Shield, Lock, Terminal, Fingerprint, ChevronRight, Activity, Cpu, Globe, Wifi, KeyRound } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { GEMINI_API_KEY_COOKIE, GEMINI_API_KEY_COOKIE_MAX_AGE_SECONDS } from "@/lib/gemini-auth";
 
 // --- Sub-Components ---
 
@@ -155,10 +156,27 @@ export default function LoginPage() {
   const router = useRouter();
   const [commanderId, setCommanderId] = useState("");
   const [authKey, setAuthKey] = useState("");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [isVercel, setIsVercel] = useState(false);
+  const [error, setError] = useState("");
   const [status, setStatus] = useState<"IDLE" | "UPLINKING" | "DECRYPTING_KEY" | "SYNCING_NODES" | "SCANNING" | "VERIFYING" | "SUCCESS">("IDLE");
   const [progress, setProgress] = useState(0);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsVercel(window.location.hostname.endsWith(".vercel.app"));
+      
+      // Pre-fill existing API key if found in cookies
+      const match = document.cookie
+        .split("; ")
+        .find((entry) => entry.startsWith(`${GEMINI_API_KEY_COOKIE}=`));
+      if (match) {
+        setGeminiApiKey(decodeURIComponent(match.split("=")[1] ?? ""));
+      }
+    }
+  }, []);
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!containerRef.current) return;
@@ -171,8 +189,18 @@ export default function LoginPage() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commanderId || !authKey) return;
+    if (!commanderId || !authKey) {
+      setError("COMMANDER ID AND AUTHORIZATION KEY ARE REQUIRED");
+      return;
+    }
 
+    const trimmedKey = geminiApiKey.trim();
+    if (isVercel && !trimmedKey) {
+      setError("GEMINI API KEY IS REQUIRED FOR VERCEL DEPLOYMENT");
+      return;
+    }
+
+    setError("");
     setStatus("UPLINKING");
     let p = 0;
     
@@ -217,7 +245,21 @@ export default function LoginPage() {
                       setStatus("SUCCESS");
                       localStorage.setItem("warmatrix_auth", "true");
                       localStorage.setItem("warmatrix_auth_expires", (Date.now() + 1000 * 60 * 60 * 24).toString()); // Expires in 24 hours
-                      setTimeout(() => router.push("/console"), 800);
+                      
+                      // Save Gemini API key to cookie
+                      const secureFlag = window.location.protocol === "https:" ? "; Secure" : "";
+                      if (trimmedKey) {
+                        document.cookie = `${GEMINI_API_KEY_COOKIE}=${encodeURIComponent(trimmedKey)}; Path=/; Max-Age=${GEMINI_API_KEY_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secureFlag}`;
+                      } else {
+                        // Clear cookie if left empty
+                        document.cookie = `${GEMINI_API_KEY_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+                      }
+
+                      setTimeout(() => {
+                        const params = new URLSearchParams(window.location.search);
+                        const next = params.get('next');
+                        router.push(next && next.startsWith('/') ? next : "/console");
+                      }, 800);
                     }, 1000);
                   }
                 }, 100);
@@ -304,6 +346,39 @@ export default function LoginPage() {
                   />
                 </div>
               </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex justify-between items-center pl-1">
+                  <label className="text-[10px] font-mono text-[#4B6A8A] uppercase tracking-wider">
+                    Gemini API Key
+                  </label>
+                  {isVercel ? (
+                    <span className="text-[9px] font-mono text-[#FCA5A5] uppercase tracking-wider animate-pulse font-bold">
+                      * Required on Vercel
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-mono text-[#4B6A8A] uppercase tracking-wider">
+                      Optional (Local setup)
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#1F6FEB]/60" />
+                  <input 
+                    type="password"
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    placeholder="Enter your Gemini API key"
+                    className="w-full bg-[#050810] border border-[#1F6FEB]/30 rounded-sm py-3 pl-10 pr-4 text-[13px] font-mono text-[#E6EDF3] placeholder:text-[#273444] focus:outline-none focus:border-[#1F6FEB] transition-all"
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <div className="text-[11px] font-mono text-[#FCA5A5] border border-[#FCA5A5]/30 bg-[#FCA5A5]/10 p-2.5 rounded-sm text-center uppercase tracking-wider font-bold">
+                  {error}
+                </div>
+              )}
 
               <button 
                 type="submit"

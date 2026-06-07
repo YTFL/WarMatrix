@@ -19,7 +19,7 @@ $env:EMPTY_CUDA_CACHE_AFTER_REQUEST = "true"  # Clear CUDA cache after request t
 
 # LM Studio Configuration (Proxy Mode)
 $env:USE_LM_STUDIO = "false"                  # Set to "true" to use external GGUF model
-$env:LM_STUDIO_IP = "192.168.144.11"          # IP of the machine hosting LM Studio
+$env:LM_STUDIO_IP = "localhost"          # IP of the machine hosting LM Studio
 $env:LM_STUDIO_PORT = "1234"                  # Default LM Studio port
 $env:LM_STUDIO_API_KEY = ""                   # Optional Bearer token
 
