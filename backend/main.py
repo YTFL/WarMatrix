@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router as api_router
 from api.procedural.routes import router as procedural_router
 
-app = FastAPI(title="WarMatrix Backend Engine")
+app = FastAPI(title="WarMatrix Backend Engine",root_path="/backend")
 
 # Add CORS so the frontend can communicate with the backend
 app.add_middleware(
