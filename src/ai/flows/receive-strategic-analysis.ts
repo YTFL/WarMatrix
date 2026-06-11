@@ -11,8 +11,11 @@
 import { z } from 'zod';
 
 const isVercel = process.env.VERCEL === 'true';
+
 const apiBaseUrl = isVercel
-    ? (process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/api` : '/api')
+    ? (process.env.VERCEL_ENV === 'production'
+        ? 'https://war-matrix.vercel.app/api' // Hardcode your production domain here
+        : (process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/api` : '/api'))
     : 'http://localhost:8000/api';
 
 const ReceiveStrategicAnalysisInputSchema = z.object({
