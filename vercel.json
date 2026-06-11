@@ -7,14 +7,14 @@
     "backend": {
       "root": "backend",
       "entrypoint": "main.py",
-      "routePrefix": "/_/backend",
+      "routePrefix": "/backend",
       "framework": "fastapi"
     }
   },
   "routes": [
     {
-      "src": "/_/backend/(.*)",
-      "dest": "/_/backend/$1",
+      "src": "/backend/(.*)",
+      "dest": "/backend/$1",
       "continue": true
     }
   ]
