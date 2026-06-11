@@ -71,7 +71,10 @@ GENERATE RAW JSON DICTIONARY:`;
     try {
         const res = await fetch(`${apiBaseUrl}/sitrep`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '',
+            },
             body: JSON.stringify({
                 instruction,
                 battlefield_data,
