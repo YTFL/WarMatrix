@@ -6,13 +6,10 @@ import {
     buildTerrainGridFromPeaks,
 } from '@/lib/tacticalTerrain';
 
-const BACKEND_ROUTE_PREFIX = '/_/backend';
-
-const apiBaseUrl = typeof window === 'undefined'
-    ? process.env.NEXT_PUBLIC_API_URL
-        ? `${process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '')}${BACKEND_ROUTE_PREFIX}/api`
-        : `http://localhost:8000${BACKEND_ROUTE_PREFIX}/api`
-    : `${BACKEND_ROUTE_PREFIX}/api`;
+const isVercel = process.env.VERCEL === 'true';
+const apiBaseUrl = isVercel
+    ? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api` : '/api')
+    : 'http://localhost:8000/api';
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 
