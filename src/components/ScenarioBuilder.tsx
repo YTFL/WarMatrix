@@ -33,6 +33,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { GenerateScenarioInput, GenerateScenarioOutput } from '@/ai/flows/generate-scenario';
+import { GEMINI_MODEL_COOKIE, GEMINI_API_KEY_COOKIE_MAX_AGE_SECONDS } from '@/lib/gemini-auth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,9 @@ interface ScenarioBuilderProps {
   onOperationConfigured?: (name: string, terrain: TerrainType, weather: WeatherType) => void;
   initialMode?: EntryMode;
   isInline?: boolean;
+  modelInfo?: { service: string; model: string; model_loaded: boolean } | null;
+  geminiModel?: string;
+  onModelChange?: (model: string) => void;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -141,10 +145,78 @@ type AIGenStatus = 'idle' | 'rolling' | 'generating' | 'done' | 'error';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScenarioGenerated, onBriefingGenerated, onOperationConfigured, initialMode = null, isInline = false }: ScenarioBuilderProps) {
+export function ScenarioBuilder({
+  units,
+  onUpdateUnits,
+  isOpen,
+  onClose,
+  onScenarioGenerated,
+  onBriefingGenerated,
+  onOperationConfigured,
+  initialMode = null,
+  isInline = false,
+  modelInfo: propModelInfo,
+  geminiModel: propGeminiModel,
+  onModelChange: propOnModelChange,
+}: ScenarioBuilderProps) {
 
   // ── Entry mode gate ──────────────────────────────────────────────────────────
   const [entryMode, setEntryMode] = useState<EntryMode>(initialMode);
+
+  const [internalModelInfo, setInternalModelInfo] = useState<{
+    service: string;
+    model: string;
+    model_loaded: boolean;
+  } | null>(null);
+
+  const [internalGeminiModel, setInternalGeminiModel] = useState('gemini-3.5-flash');
+
+  const modelInfo = propModelInfo !== undefined ? propModelInfo : internalModelInfo;
+  const geminiModel = propGeminiModel !== undefined ? propGeminiModel : internalGeminiModel;
+  const setModelInfo = propModelInfo !== undefined ? () => {} : setInternalModelInfo;
+
+  React.useEffect(() => {
+    if (isOpen && propModelInfo === undefined) {
+      // Get model info from backend health check only if not provided by parent
+      fetch('/api/sitrep')
+        .then(r => r.json())
+        .then(data => {
+          if (data.ok) {
+            const info = {
+              service: data.service || 'local',
+              model: data.model || 'Local Model',
+              model_loaded: !!data.model_loaded,
+            };
+            setInternalModelInfo(info);
+            if (data.service === 'gemini-api' && data.model) {
+              setInternalGeminiModel(data.model);
+            }
+            pushLog('SYS', `Operational AI Core: ${info.service.toUpperCase()} // ${info.model}`);
+          } else {
+            setInternalModelInfo(null);
+            pushLog('ERR', 'AI Server status offline or unreachable.');
+          }
+        })
+        .catch(() => {
+          setInternalModelInfo(null);
+          pushLog('ERR', 'AI Server status offline or unreachable.');
+        });
+    } else if (isOpen && propModelInfo) {
+      pushLog('SYS', `Operational AI Core: ${propModelInfo.service.toUpperCase()} // ${propModelInfo.model}`);
+    }
+  }, [isOpen, propModelInfo]);
+
+  const handleModelChange = (val: string) => {
+    if (propOnModelChange) {
+      propOnModelChange(val);
+    } else {
+      setInternalGeminiModel(val);
+      setInternalModelInfo(prev => prev ? { ...prev, model: val } : null);
+      const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+      document.cookie = `${GEMINI_MODEL_COOKIE}=${encodeURIComponent(val)}; Path=/; Max-Age=${GEMINI_API_KEY_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secureFlag}`;
+    }
+    pushLog('SYS', `Selected Gemini Model switched to: ${val}`);
+  };
 
   // ── Reset state on open ──────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -860,6 +932,47 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
                         ))}
                       </div>
 
+                      {modelInfo ? (
+                        <div className="flex flex-col gap-1.5 w-full max-w-[240px] mt-2 mb-2">
+                          <label 
+                            className="text-[9px] font-mono uppercase tracking-wider text-center"
+                            style={{ color: modelInfo.service === 'gemini-api' ? '#A78BFA' : '#4D637F' }}
+                          >
+                            {modelInfo.service === 'gemini-api' ? 'Active Gemini Core' : 'Active Local LLM Core'}
+                          </label>
+                          {modelInfo.service === 'gemini-api' ? (
+                            <Select value={geminiModel} onValueChange={handleModelChange}>
+                              <SelectTrigger className="w-full h-9 bg-[#050810]/80 border border-[#8B5CF6]/30 rounded-sm px-3 text-[11px] font-mono text-[#E6EDF3] focus:ring-0 focus:border-[#8B5CF6] transition-all">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-[#050810] border border-[#8B5CF6]/30 text-white font-mono">
+                                <SelectItem value="gemini-3.5-flash">Gemini 3.5 Flash</SelectItem>
+                                <SelectItem value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</SelectItem>
+                                <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                                <SelectItem value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</SelectItem>
+                                <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <div 
+                              className="w-full bg-[#050810]/40 border border-[#1F6FEB]/15 rounded-sm py-2 px-3 text-[11px] font-mono text-[#8B9EB7] text-center select-none truncate"
+                              title={modelInfo.model}
+                            >
+                              {modelInfo.model}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-1.5 w-full max-w-[240px] mt-2 mb-2">
+                          <label className="text-[9px] font-mono text-[#4D637F] uppercase tracking-wider text-center">
+                            Core Status
+                          </label>
+                          <div className="w-full bg-[#050810]/40 border border-[#1F6FEB]/15 rounded-sm py-2 px-3 text-[11px] font-mono text-[#8B9EB7] text-center select-none animate-pulse">
+                            Awaiting AI Core response...
+                          </div>
+                        </div>
+                      )}
+
                       <button
                         onClick={handleRandomGenerate}
                         className="mt-2 flex items-center gap-3 px-8 py-3 rounded-sm border font-bold text-[10px] uppercase tracking-widest transition-all"
@@ -1112,6 +1225,8 @@ export function ScenarioBuilder({ units, onUpdateUnits, isOpen, onClose, onScena
                     logs={termLogs}
                     isRunning={aiStatus === 'rolling' || aiStatus === 'generating'}
                     title="SCENARIO_GEN_UPLINK"
+                    modelName={modelInfo?.model}
+                    isGemini={modelInfo?.service === 'gemini-api'}
                   />
                 </div>
               </div>

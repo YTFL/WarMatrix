@@ -1,6 +1,6 @@
 import { cookies, headers } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { GEMINI_API_KEY_COOKIE } from '@/lib/gemini-auth';
+import { GEMINI_API_KEY_COOKIE, GEMINI_MODEL_COOKIE } from '@/lib/gemini-auth';
 
 const AI_SERVER_BASE = process.env.AI_SERVER_BASE_URL ?? 'http://127.0.0.1:8000';
 const SIM_SERVER_BASE = process.env.SIM_SERVER_BASE_URL ?? 'http://127.0.0.1:8001';
@@ -101,12 +101,16 @@ export async function GET() {
     }
 
     const geminiApiKey = await getGeminiApiKey();
+    const cookieStore = await cookies();
     if (geminiApiKey) {
+        const selectedModel = cookieStore.get(GEMINI_MODEL_COOKIE)?.value?.trim();
+        const modelName = selectedModel || (process.env.GEMINI_MODEL ?? 'gemini-3.5-flash');
         return NextResponse.json({
             ok: true,
             service: 'gemini-api',
             model_loaded: true,
             device: 'cloud',
+            model: modelName,
         });
     }
 
@@ -115,10 +119,20 @@ export async function GET() {
             signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
         });
         const data = await res.json();
-        return NextResponse.json(data, { status: res.status });
+        let model = 'Local Model';
+        if (data.use_lm_studio) {
+            model = 'LM Studio';
+        } else if (data.model_path) {
+            const parts = data.model_path.split(/[\\/]/);
+            model = parts[parts.length - 1] || 'Local Model';
+        }
+        return NextResponse.json({
+            ...data,
+            model,
+        }, { status: res.status });
     } catch {
         return NextResponse.json(
-            { ok: false, error: 'ai_server_offline', model_loaded: false },
+            { ok: false, error: 'ai_server_offline', model_loaded: false, model: 'Offline' },
             { status: 503 }
         );
     }
@@ -309,7 +323,9 @@ export async function POST(req: Request) {
                 }
             };
 
-            const modelName = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash';
+            const cookieStore = await cookies();
+            const selectedModel = cookieStore.get(GEMINI_MODEL_COOKIE)?.value?.trim();
+            const modelName = selectedModel || (process.env.GEMINI_MODEL ?? 'gemini-3.5-flash');
             const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
 
             const res = await fetch(geminiUrl, {

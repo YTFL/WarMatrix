@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { TacticalMapDisplay } from '@/components/TacticalMapDisplay';
 import { ScenarioBuilder } from '@/components/ScenarioBuilder';
+import { GEMINI_MODEL_COOKIE, GEMINI_API_KEY_COOKIE_MAX_AGE_SECONDS } from '@/lib/gemini-auth';
 import { SecureCommsConsole, ChatMessage, MessageSource, INITIAL_LOG, nowTs } from '@/components/SecureCommsConsole';
 import { SidebarAccordion } from '@/components/SidebarAccordion';
 import { GenerateScenarioOutput } from '@/ai/flows/generate-scenario';
@@ -317,6 +318,45 @@ export default function WarMatrixPage() {
   const { toast } = useToast();
   const [turn, setTurn] = useState(1);
   const [status, setStatus] = useState<'ACTIVE' | 'AWAITING COMMAND' | 'PROCESSING'>('ACTIVE');
+
+  const [modelInfo, setModelInfo] = useState<{
+    service: string;
+    model: string;
+    model_loaded: boolean;
+  } | null>(null);
+  const [geminiModel, setGeminiModel] = useState('gemini-3.5-flash');
+
+  // Load active model info on mount
+  useEffect(() => {
+    fetch('/api/sitrep')
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          const info = {
+            service: data.service || 'local',
+            model: data.model || 'Local Model',
+            model_loaded: !!data.model_loaded,
+          };
+          setModelInfo(info);
+          if (data.service === 'gemini-api' && data.model) {
+            setGeminiModel(data.model);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleModelChange = (val: string) => {
+    setGeminiModel(val);
+    const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${GEMINI_MODEL_COOKIE}=${encodeURIComponent(val)}; Path=/; Max-Age=${GEMINI_API_KEY_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secureFlag}`;
+    setModelInfo(prev => prev ? { ...prev, model: val } : null);
+    toast({
+      title: "AI CORE UPDATED",
+      description: `Active model switched to: ${val}`,
+      variant: "default",
+    });
+  };
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysis, setAnalysis] = useState<any>(null);
   const [role, setRole] = useState<'BLUE_TEAM' | 'RED_TEAM'>('BLUE_TEAM');
@@ -902,6 +942,9 @@ export default function WarMatrixPage() {
           setBuilderScenarioMode('selection');
           setIsBuilderWorkspaceActive(true);
         }}
+        modelInfo={modelInfo}
+        geminiModel={geminiModel}
+        onModelChange={handleModelChange}
       />
 
       <main className="flex-1 p-4 flex gap-4 overflow-hidden">
@@ -1170,6 +1213,9 @@ export default function WarMatrixPage() {
                 onOperationConfigured={handleOperationConfigured}
                 initialMode={builderScenarioMode === 'selection' ? null : builderScenarioMode === 'random' ? 'AI' : 'CUSTOM'}
                 isInline={true}
+                modelInfo={modelInfo}
+                geminiModel={geminiModel}
+                onModelChange={handleModelChange}
               />
             ) : activeScenario ? (
               <TacticalMapDisplay
@@ -1197,6 +1243,9 @@ export default function WarMatrixPage() {
                 onOperationConfigured={handleOperationConfigured}
                 initialMode={centerScenarioMode === 'random' ? 'AI' : 'CUSTOM'}
                 isInline={true}
+                modelInfo={modelInfo}
+                geminiModel={geminiModel}
+                onModelChange={handleModelChange}
               />
             ) : (
               /* ── NO SIMULATION STATE ── */
