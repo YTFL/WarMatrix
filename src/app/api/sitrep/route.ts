@@ -1,6 +1,7 @@
 import { cookies, headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { GEMINI_API_KEY_COOKIE, GEMINI_MODEL_COOKIE } from '@/lib/gemini-auth';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const AI_SERVER_BASE = process.env.AI_SERVER_BASE_URL ?? 'http://127.0.0.1:8000';
 const SIM_SERVER_BASE = process.env.SIM_SERVER_BASE_URL ?? 'http://127.0.0.1:8001';
@@ -303,19 +304,18 @@ export async function POST(req: Request) {
 
             const isJsonRequested = payload.instruction.toLowerCase().includes("json");
 
-            const geminiPayload = {
-                contents: [
-                    {
-                        parts: [
-                            { text: userPrompt }
-                        ]
-                    }
-                ],
-                systemInstruction: {
-                    parts: [
-                        { text: systemInstruction }
-                    ]
-                },
+            const cookieStore = await cookies();
+            const selectedModel = cookieStore.get(GEMINI_MODEL_COOKIE)?.value?.trim();
+            const modelName = selectedModel || (process.env.GEMINI_MODEL ?? 'gemini-3.5-flash');
+
+            const genAI = new GoogleGenerativeAI(geminiApiKey);
+            const model = genAI.getGenerativeModel({ 
+                model: modelName,
+                systemInstruction 
+            });
+
+            const result = await model.generateContent({
+                contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
                 generationConfig: {
                     temperature: payload.temperature,
                     maxOutputTokens: payload.max_new_tokens,
@@ -323,35 +323,10 @@ export async function POST(req: Request) {
                     ...(isJsonRequested ? { responseMimeType: "application/json" } : {}),
                     ...(raw.response_schema ? { responseSchema: raw.response_schema } : {})
                 }
-            };
-
-            const cookieStore = await cookies();
-            const selectedModel = cookieStore.get(GEMINI_MODEL_COOKIE)?.value?.trim();
-            const modelName = selectedModel || (process.env.GEMINI_MODEL ?? 'gemini-3.5-flash');
-            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
-
-            const res = await fetch(geminiUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(geminiPayload),
-                signal: AbortSignal.timeout(INFERENCE_TIMEOUT_MS),
             });
 
-            const data = await res.json();
-
-            if (!res.ok) {
-                return NextResponse.json(
-                    {
-                        error: 'gemini_api_error',
-                        details: data?.error?.message ?? 'Direct Gemini API request failed.',
-                    },
-                    { status: res.status }
-                );
-            }
-
-            const responseText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+            const response = await result.response;
+            const responseText = response.text();
             
             return NextResponse.json({
                 ok: true,
@@ -359,12 +334,8 @@ export async function POST(req: Request) {
                 ai_narrative_output: responseText,
                 source: 'gemini_api'
             });
-        } catch (err: unknown) {
-            const isTimeout =
-                (err instanceof DOMException && err.name === 'TimeoutError') ||
-                (err instanceof Error && err.name === 'TimeoutError');
-
-            if (isTimeout) {
+        } catch (err: any) {
+            if (err?.message?.includes('deadline exceeded') || err?.name === 'TimeoutError') {
                 return NextResponse.json(
                     {
                         error: 'gemini_api_timeout',
@@ -377,7 +348,7 @@ export async function POST(req: Request) {
             return NextResponse.json(
                 {
                     error: 'gemini_api_failed',
-                    details: err instanceof Error ? err.message : 'Unknown error during Gemini API fetch.',
+                    details: err?.message ?? 'Unknown error during Gemini AI inference.',
                 },
                 { status: 500 }
             );
