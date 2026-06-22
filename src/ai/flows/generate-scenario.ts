@@ -317,31 +317,14 @@ export async function generateScenario(
         });
     };
 
-    const instruction = `OUTPUT STRICTLY VALID JSON DICTIONARY ONLY. NO EXPLANATIONS. NO MARKDOWN.
-Generate a tactical scenario as a highly compressed JSON dictionary containing:
-- "u" (units array, max 4)
-- "p" (terrain peaks array, EXACTLY 3)
-- "m" (terrain map object)
-
-FORMAT KEY FOR "u" (4 UNITS):
-"l" = label (String, short military unit name)
-"c" = class (Must be: Infantry, Mechanized, Armor, Artillery, Recon, Logistics, Command Unit, Infrastructure, Objective)
-"r" = role (Must be: FRIENDLY, ENEMY, NEUTRAL, INFRASTRUCTURE)
-"x" = 1 to 44
-"y" = 1 to 28
-
-FORMAT KEY FOR "p" (3 TERRAIN PEAKS - Determines Map Topography):
-"x" = 1 to 44
-"y" = 1 to 28
-"h" = Peak Height (Float 0.5 to 1.5)
-
-FORMAT KEY FOR "m" (terrain map source-of-truth):
-"s" = [44,28]
-"t" = 2D terrain grid [28 rows][44 cols] where each cell is one of:
-plain | forest | hill | mountain | river | road | urban
-
-EXAMPLE OUPUT (NO MARKDOWN TICK BLOCKS, RAW DICT ONLY):
-{"u":[{"l":"Bravo Armor","c":"Armor","r":"FRIENDLY","x":12,"y":14},{"l":"Outpost","c":"Objective","r":"NEUTRAL","x":36,"y":20}],"p":[{"x":22,"y":12,"h":1.2},{"x":10,"y":20,"h":0.8},{"x":33,"y":18,"h":1.1}],"m":{"s":[44,28],"t":[["plain","forest"],["river","hill"]]}}
+    const instruction = `RAW JSON ONLY. NO MARKDOWN. NO EXPLANATION.
+Output a single JSON object with exactly these keys:
+"u": 4 units. Each: {"l":<name>,"c":<class>,"r":<role>,"x":<1-44>,"y":<1-28>}
+  c values: Infantry|Mechanized|Armor|Artillery|Recon|Logistics|Command Unit|Infrastructure|Objective
+  r values: FRIENDLY|ENEMY|NEUTRAL|INFRASTRUCTURE
+"p": exactly 3 peaks. Each: {"x":<1-44>,"y":<1-28>,"h":<0.5-1.5>}
+"m": terrain map. {"s":[44,28],"t":<28 rows x 44 cols grid, each cell: plain|forest|hill|mountain|river|road|urban>}
+Output ONLY the JSON object, starting with { and ending with }.
 `;
 
     const battlefield_data = `MISSION: ${input.missionContext}
@@ -430,7 +413,7 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
         body: JSON.stringify({
             instruction,
             battlefield_data,
-            max_new_tokens: 2048,    // Increased cap to allow full 44x28 grid output
+            max_new_tokens: 6144,    // Full 44x28 grid = ~2600 tokens alone; 6144 gives safe headroom
             use_cache: true,
             do_sample: false,       // Greedy decoding
             response_schema,
@@ -501,30 +484,60 @@ GENERATE RAW JSON SECURE DICTIONARY:`;
 
     // ── JSON Repair Heuristics ──────────────────────────────────────────────────
 
-    // 1. Handle missing commas between key-value pairs: "val" "key": -> "val", "key":
-    jsonString = jsonString.replace(/"\s+("[\w_]+"\s*:)/g, '", $1');
+    // 1. Handle missing commas between objects in arrays: } { -> }, {
+    jsonString = jsonString.replace(/\}(\s*)\{/g, '},$1{');
 
-    // 2. Handle missing commas between objects in arrays: } { -> }, {
-    jsonString = jsonString.replace(/\}\s*\{/g, '}, {');
-
-    // 3. Fix unquoted keys: {key: -> {"key":
-    jsonString = jsonString.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
-
-    // 4. Fix unescaped quotes and literal newlines in labels
-    const keysToFix = ["l"];
-    for (const key of keysToFix) {
-        const regex = new RegExp(`("${key}"\\s*:\\s*")([\\s\\S]*?)(?="\\s*[,}\\]])`, 'g');
-        jsonString = jsonString.replace(regex, (match, p1, p2) => {
-            let val = p2.replace(/(?<!\\)"/g, '\\"');
-            val = val.replace(/\n/g, '\\n');
-            return p1 + val;
-        });
+    // 2. Fix unquoted keys ONLY outside of JSON string literals.
+    // Walk the string character-by-character, skipping over quoted sections,
+    // and apply the "bare key -> quoted key" transform only on structural tokens.
+    {
+        let result = '';
+        let i = 0;
+        while (i < jsonString.length) {
+            const ch = jsonString[i];
+            if (ch === '"') {
+                // Copy entire quoted string as-is
+                result += ch;
+                i++;
+                while (i < jsonString.length) {
+                    const c = jsonString[i];
+                    result += c;
+                    if (c === '\\') { i++; if (i < jsonString.length) { result += jsonString[i]; i++; } }
+                    else if (c === '"') { i++; break; }
+                    else i++;
+                }
+            } else {
+                // Outside a string: look for unquoted key patterns
+                const unquotedKey = /^([{,]\s*)([a-zA-Z0-9_]+)(\s*:)/.exec(jsonString.slice(i));
+                if (unquotedKey) {
+                    result += `${unquotedKey[1]}"${unquotedKey[2]}"${unquotedKey[3]}`;
+                    i += unquotedKey[0].length;
+                } else {
+                    result += ch;
+                    i++;
+                }
+            }
+        }
+        jsonString = result;
     }
 
-    // 5. Handle trailing commas
+    // 3. Handle trailing commas before closing delimiters
     jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
 
-    // 6. Close any unclosed braces/brackets (common if max_tokens is hit)
+    // 4. If truncated mid-token, trim back to the last complete JSON value
+    //    then close any unclosed braces/brackets.
+    {
+        const tr = jsonString.trimEnd();
+        const lastChar = tr[tr.length - 1];
+        if (lastChar && lastChar !== '}' && lastChar !== ']' && lastChar !== '"') {
+            const lastComplete = Math.max(tr.lastIndexOf('}'), tr.lastIndexOf(']'), tr.lastIndexOf('"'));
+            if (lastComplete > 0) jsonString = tr.substring(0, lastComplete + 1);
+        }
+    }
+    // Re-apply trailing comma cleanup after truncation trim
+    jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
+
+    // 5. Close any unclosed braces/brackets (common when max_tokens is hit)
     let openBraces = (jsonString.match(/\{/g) || []).length - (jsonString.match(/\}/g) || []).length;
     while (openBraces > 0) { jsonString += '}'; openBraces--; }
     let openBrackets = (jsonString.match(/\[/g) || []).length - (jsonString.match(/\]/g) || []).length;
