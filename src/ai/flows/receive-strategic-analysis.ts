@@ -14,11 +14,13 @@ import { GEMINI_API_KEY_COOKIE } from '@/lib/gemini-auth';
 
 const isVercel = process.env.VERCEL === 'true';
 
-const apiBaseUrl = isVercel
-    ? (process.env.VERCEL_ENV === 'production'
-        ? 'https://war-matrix.vercel.app/api' // Hardcode your production domain here
-        : (process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/api` : '/api'))
-    : 'http://localhost:8000/api';
+const apiBaseUrl = process.env.NEXT_PUBLIC_APP_URL
+    ? `${process.env.NEXT_PUBLIC_APP_URL}/api`
+    : (isVercel
+        ? (process.env.VERCEL_ENV === 'production'
+            ? 'https://war-matrix.vercel.app/api' // Hardcode your production domain here
+            : (process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/api` : '/api'))
+        : 'http://localhost:8000/api');
 
 const ReceiveStrategicAnalysisInputSchema = z.object({
   battlefieldSummary: z

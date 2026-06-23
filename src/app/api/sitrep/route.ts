@@ -4,7 +4,7 @@ import { GEMINI_API_KEY_COOKIE, GEMINI_MODEL_COOKIE } from '@/lib/gemini-auth';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const AI_SERVER_BASE = process.env.AI_SERVER_BASE_URL ?? 'http://127.0.0.1:8000';
-const SIM_SERVER_BASE = process.env.SIM_SERVER_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/backend` : 'http://127.0.0.1:8001');
+const SIM_SERVER_BASE = process.env.SIM_SERVER_BASE_URL || (process.env.NEXT_PUBLIC_APP_URL ? `${process.env.NEXT_PUBLIC_APP_URL}/backend` : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/backend` : 'http://127.0.0.1:8001'));
 const INFERENCE_TIMEOUT_MS = 300_000; // 5 min — CPU inference can be slow
 const HEALTH_TIMEOUT_MS = 5_000;     // 5 s  — quick ping only
 const SIM_TIMEOUT_MS = 120_000;
