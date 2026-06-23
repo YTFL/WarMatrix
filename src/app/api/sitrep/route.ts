@@ -4,7 +4,7 @@ import { GEMINI_API_KEY_COOKIE, GEMINI_MODEL_COOKIE } from '@/lib/gemini-auth';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const AI_SERVER_BASE = process.env.AI_SERVER_BASE_URL ?? 'http://127.0.0.1:8000';
-const SIM_SERVER_BASE = process.env.SIM_SERVER_BASE_URL ?? 'http://127.0.0.1:8001';
+const SIM_SERVER_BASE = process.env.SIM_SERVER_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/backend` : 'http://127.0.0.1:8001');
 const INFERENCE_TIMEOUT_MS = 300_000; // 5 min — CPU inference can be slow
 const HEALTH_TIMEOUT_MS = 5_000;     // 5 s  — quick ping only
 const SIM_TIMEOUT_MS = 120_000;
@@ -187,9 +187,19 @@ export async function POST(req: Request) {
                 signal: AbortSignal.timeout(SIM_TIMEOUT_MS),
             });
 
+            if (!res.ok) {
+                const text = await res.text();
+                console.error(`initialize_scenario response failed with status ${res.status}:`, text.slice(0, 500));
+                return NextResponse.json(
+                    { error: 'simulation_backend_error', status: res.status, details: text.slice(0, 500) },
+                    { status: res.status }
+                );
+            }
+
             const data = await res.json();
             return NextResponse.json(data, { status: res.status });
         } catch (err: unknown) {
+            console.error("Error in initialize_scenario:", err);
             const isTimeout =
                 (err instanceof DOMException && err.name === 'TimeoutError') ||
                 (err instanceof Error && err.name === 'TimeoutError');
@@ -207,7 +217,7 @@ export async function POST(req: Request) {
             return NextResponse.json(
                 {
                     error: 'simulation_backend_offline',
-                    details: 'Could not reach the Python simulation backend. Is backend/main.py running on port 8001?',
+                    details: `Could not reach the Python simulation backend. Error: ${err instanceof Error ? err.message : String(err)}`,
                 },
                 { status: 503 }
             );
@@ -235,9 +245,19 @@ export async function POST(req: Request) {
                 signal: AbortSignal.timeout(SIM_TIMEOUT_MS),
             });
 
+            if (!res.ok) {
+                const text = await res.text();
+                console.error(`simulate_tick response failed with status ${res.status}:`, text.slice(0, 500));
+                return NextResponse.json(
+                    { error: 'simulation_backend_error', status: res.status, details: text.slice(0, 500) },
+                    { status: res.status }
+                );
+            }
+
             const data = await res.json();
             return NextResponse.json(data, { status: res.status });
         } catch (err: unknown) {
+            console.error("Error in simulate_tick:", err);
             const isTimeout =
                 (err instanceof DOMException && err.name === 'TimeoutError') ||
                 (err instanceof Error && err.name === 'TimeoutError');
@@ -255,7 +275,7 @@ export async function POST(req: Request) {
             return NextResponse.json(
                 {
                     error: 'simulation_backend_offline',
-                    details: 'Could not reach the Python simulation backend. Is backend/main.py running on port 8001?',
+                    details: `Could not reach the Python simulation backend. Error: ${err instanceof Error ? err.message : String(err)}`,
                 },
                 { status: 503 }
             );
@@ -385,6 +405,7 @@ export async function POST(req: Request) {
 
         return NextResponse.json(data, { status: res.status });
     } catch (err: unknown) {
+        console.error("Error in sitrep fallback:", err);
         const isTimeout =
             (err instanceof DOMException && err.name === 'TimeoutError') ||
             (err instanceof Error && err.name === 'TimeoutError');
@@ -403,7 +424,7 @@ export async function POST(req: Request) {
         return NextResponse.json(
             {
                 error: 'ai_server_offline',
-                details: 'Could not reach the local AI server. Is backend_server.py running?',
+                details: `Could not reach the AI server. Error: ${err instanceof Error ? err.message : String(err)}`,
             },
             { status: 503 }
         );
