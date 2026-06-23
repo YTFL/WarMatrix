@@ -1,5 +1,4 @@
 # Ignore heavy asset folders in Vercel upload
-public/3d_assets
 ai_server
 screenshots
 .venv
