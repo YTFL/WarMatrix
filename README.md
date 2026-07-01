@@ -117,5 +117,5 @@ npm run dev
 
 ## 📜 License
 
-WarMatrix is released under the **MIT License**. See [LICENSE](LICENSE) for more details.
+WarMatrix is released under the **GNU AFFERO GENERAL PUBLIC LICENSE**. See [LICENSE](LICENSE) for more details.
 
