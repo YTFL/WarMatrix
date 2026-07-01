@@ -70,10 +70,9 @@ Use this for a fully managed cloud experience. No local GPU required.
 
 ## 🚀 Phase 4: Launching the System
 
-Once all components are configured, you can launch the entire suite concurrently:
+Once all components are configured, you can launch the entire suite concurrently using:
 
 ```bash
-# Launch both Frontend and Backend concurrently
 npm run dev
 ```
 
